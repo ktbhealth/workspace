@@ -1,4 +1,4 @@
-import { Console, Effect, FileSystem } from "effect";
+import { Console, Effect, FileSystem, Result } from "effect";
 import { Command } from "effect/cli";
 import { ChildProcess } from "effect/process";
 
@@ -20,6 +20,7 @@ export const cloneCommand = Command.make("clone", { root: rootFlag }, (config) =
 
 		let cloned = 0;
 		let skipped = 0;
+		const failures: Array<string> = [];
 		for (const repo of orgRepos) {
 			const target = repoDir(config.root, repo.name);
 			// fs.exists throws ENOTDIR when an intermediate path is a file —
@@ -31,15 +32,28 @@ export const cloneCommand = Command.make("clone", { root: rootFlag }, (config) =
 			} else if (yield* exists(target)) {
 				yield* Console.warn(`warn    ${repo.name} exists but is not a git repo — leaving it alone`);
 			} else {
-				yield* exec(
-					`git clone ${repo.sshUrl}`,
+				const result = yield* exec(
+					`git clone ${repo.name}`,
 					ChildProcess.make("git", ["clone", repo.sshUrl, target]),
-				);
-				yield* Console.log(`cloned  ${repo.name}`);
-				cloned += 1;
+				).pipe(Effect.result);
+				if (Result.isFailure(result)) {
+					const detail = String(result.failure);
+					yield* Console.error(`FAIL    ${repo.name} ${detail}`);
+					failures.push(`${repo.name}: ${detail}`);
+				} else {
+					yield* Console.log(`cloned  ${repo.name}`);
+					cloned += 1;
+				}
 			}
 		}
-		yield* Console.log(`done: ${cloned} cloned, ${skipped} already present`);
+		yield* Console.log(
+			`done: ${cloned} cloned, ${skipped} already present, ${failures.length} failed`,
+		);
 		yield* refreshWorkspaceFile(config.root);
+		if (failures.length > 0) {
+			return yield* Effect.fail(
+				new Error(`failed to clone ${failures.length} repo(s): ${failures.join("; ")}`),
+			);
+		}
 	}),
 ).pipe(Command.withDescription("Clone all ktbhealth org repos into repos/"));

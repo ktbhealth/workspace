@@ -1,4 +1,4 @@
-import { Console, Effect } from "effect";
+import { Console, Effect, Result } from "effect";
 import { Command } from "effect/cli";
 import { ChildProcess } from "effect/process";
 
@@ -11,12 +11,18 @@ export const updateCommand = Command.make("update", { root: rootFlag }, (config)
 		for (const name of names) {
 			const result = yield* capture(
 				ChildProcess.make("git", ["-C", repoDir(config.root, name), "pull", "--ff-only"]),
-			).pipe(Effect.mapError((error) => new Error(`git pull ${name}: ${String(error)}`)));
-			if (result.exitCode === 0) {
-				yield* Console.log(`ok      ${name.padEnd(22)} ${lastLine(result.stdout)}`);
+			).pipe(
+				Effect.mapError((error) => new Error(`git pull ${name}: ${String(error)}`)),
+				Effect.result,
+			);
+			if (Result.isFailure(result)) {
+				yield* Console.log(`FAIL    ${name.padEnd(22)} ${String(result.failure)}`);
+				failed += 1;
+			} else if (result.success.exitCode === 0) {
+				yield* Console.log(`ok      ${name.padEnd(22)} ${lastLine(result.success.stdout)}`);
 			} else {
 				yield* Console.log(
-					`FAIL    ${name.padEnd(22)} ${result.stderr.trim() || result.stdout.trim()}`,
+					`FAIL    ${name.padEnd(22)} ${result.success.stderr.trim() || result.success.stdout.trim()}`,
 				);
 				failed += 1;
 			}

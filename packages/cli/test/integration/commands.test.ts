@@ -147,6 +147,34 @@ describe("clone", () => {
 		expect(calls.filter((c) => c.startsWith("git clone"))).toHaveLength(0);
 	});
 
+	it("continues past failed clones, refreshes the workspace, then fails", async () => {
+		const root = makeRoot();
+		await expect(
+			runWith(["clone", "--root", root], (command) => {
+				const text = commandText(command);
+				if (text.startsWith("gh repo list")) {
+					return ok(
+						ghJson([
+							{ name: "alpha", sshUrl: "u", isArchived: false },
+							{ name: "beta", sshUrl: "u", isArchived: false },
+						]),
+					);
+				}
+				if (text.endsWith("/alpha")) {
+					return { stdout: "", stderr: "fatal: repo not found", exitCode: 128 };
+				}
+				const target = text.split(" ").at(-1) ?? "";
+				mkdirSync(join(target, ".git"), { recursive: true });
+				return ok("Cloning into 'x'...\n");
+			}),
+		).rejects.toThrow("failed to clone 1 repo(s): alpha:");
+
+		// beta still cloned and the workspace file was refreshed
+		expect(existsSync(join(root, "repos", "beta", ".git"))).toBe(true);
+		const workspace = JSON.parse(readFileSync(join(root, "ktbhealth.code-workspace"), "utf8"));
+		expect(workspace.folders.map((f: { name: string }) => f.name)).toEqual(["ktbhealth", "beta"]);
+	});
+
 	it("fails when gh exits non-zero", async () => {
 		const root = makeRoot();
 		await expect(
@@ -224,6 +252,18 @@ describe("status", () => {
 			})),
 		).rejects.toThrow("git status alpha failed with exit code 128");
 	});
+
+	it("reports status failures that only write to stdout", async () => {
+		const root = makeRoot();
+		addGitRepo(root, "alpha");
+		await expect(
+			runWith(["status", "--root", root], () => ({
+				stdout: "fatal: corrupt index",
+				stderr: "",
+				exitCode: 128,
+			})),
+		).rejects.toThrow("1 repo(s) failed status: alpha:");
+	});
 });
 
 describe("workspace", () => {
@@ -265,7 +305,20 @@ describe("spawn failures", () => {
 		);
 	});
 
-	it("labels update spawn failures per repo", async () => {
+	it("wraps gh spawn failures through exec's label", async () => {
+		const root = makeRoot();
+		const failingSpawner = Layer.succeed(
+			ChildProcessSpawner.ChildProcessSpawner,
+			ChildProcessSpawner.make(() =>
+				Effect.fail(
+					PlatformError.badArgument({ module: "test", method: "spawn", description: "nope" }),
+				),
+			),
+		);
+		await expect(run(["clone", "--root", root], failingSpawner)).rejects.toThrow("gh repo list:");
+	});
+
+	it("counts spawn failures per repo and still reports them", async () => {
 		const root = makeRoot();
 		addGitRepo(root, "alpha");
 		const failingSpawner = Layer.succeed(
@@ -277,7 +330,7 @@ describe("spawn failures", () => {
 			),
 		);
 		await expect(run(["update", "--root", root], failingSpawner)).rejects.toThrow(
-			"git pull alpha:",
+			"1 repo(s) failed to update",
 		);
 	});
 });
