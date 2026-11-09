@@ -1,1 +1,6 @@
 org = "ktbhealth"
+
+[policy]
+remote_must_match_org = true
+require_files = ["AGENTS.md"]
+require_worktrees = ["project"]
