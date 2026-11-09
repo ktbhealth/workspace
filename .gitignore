@@ -1,0 +1,8 @@
+# Cloned org repositories — independent git repos, not submodules.
+/repos/
+
+# Local editor state
+/.vscode/
+
+# OS noise
+.DS_Store

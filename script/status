@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Show branch, dirty count, and ahead/behind for every clone under repos/.
+set -uo pipefail
+source "$(dirname "$0")/lib.sh"
+
+printf '%-22s %-18s %6s  %s\n' NAME BRANCH DIRTY SYNC
+while IFS=$'\t' read -r name url; do
+	dir="$REPOS_DIR/$name"
+	[ -e "$dir/.git" ] || continue
+	branch=$(git -C "$dir" branch --show-current 2>/dev/null)
+	branch=${branch:-"(detached)"}
+	dirty=$(git -C "$dir" status --porcelain | wc -l | tr -d ' ')
+	if git -C "$dir" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
+		counts=$(git -C "$dir" rev-list --left-right --count 'HEAD...@{upstream}')
+		ahead=${counts%%$'\t'*}
+		behind=${counts##*$'\t'}
+		sync="+${ahead}/-${behind}"
+	else
+		sync="no upstream"
+	fi
+	printf '%-22s %-18s %6s  %s\n' "$name" "$branch" "$dirty" "$sync"
+done < <(list_repos)

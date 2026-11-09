@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Regenerate ktbhealth.code-workspace from the locally cloned repos.
+set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+
+out="$ROOT/ktbhealth.code-workspace"
+
+entries=()
+while IFS=$'\t' read -r name url; do
+	[ -d "$REPOS_DIR/$name" ] || continue
+	entries+=("$(printf '\t\t{\n\t\t\t"name": "%s",\n\t\t\t"path": "repos/%s"\n\t\t}' "$name" "$name")")
+done < <(list_repos)
+
+{
+	printf '{\n'
+	printf '\t"folders": [\n'
+	printf '\t\t{\n\t\t\t"name": "ktbhealth",\n\t\t\t"path": "."\n\t\t}'
+	for entry in "${entries[@]}"; do
+		printf ',\n%s' "$entry"
+	done
+	printf '\n\t],\n'
+	cat <<'JSON'
+	"settings": {
+		"search.exclude": {
+			"**/node_modules": true,
+			"**/dist": true,
+			"**/coverage": true,
+			"**/.alchemy": true,
+			"**/.output": true,
+			"**/.vite": true
+		}
+	}
+}
+JSON
+} > "$out"
+
+printf 'wrote %s (%d repo folders)\n' "$out" "${#entries[@]}"
