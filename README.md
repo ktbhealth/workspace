@@ -1,56 +1,55 @@
 # ktbhealth workspace
 
 Metarepo for the [ktbhealth](https://github.com/ktbhealth) GitHub org —
-a Vite+ / bun monorepo whose `ktbw` CLI manages every org repository
-cloned under `repos/`.
+this repo is **config only**. All cloning, syncing, and workspace-file
+generation is done by [lasius](https://github.com/9aia/lasius), the
+generic workspace gardener.
 
 `repos/` is gitignored — each entry is an independent clone with its
 own history, branches, and remotes. No submodules.
-`ktbhealth.code-workspace` is also generated, not committed — `ktbw
-init` (or `code-workspace:generate`) writes it.
+`ktbhealth.code-workspace` is generated at runtime, never committed.
 
-## Layout
+## Config
 
-| path                       | what                                                                                                                 |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `repos/`                   | all org clones (gitignored)                                                                                          |
-| `packages/core`            | `@ktbhealth/workspace-core` — pure logic: gh JSON decoding, workspace-file generation, git status parsing/formatting |
-| `packages/cli`             | `@ktbhealth/workspace-cli` — `ktbw` CLI (`effect/cli` + `effect/process` + `effect/schema`, Node platform services)  |
-| `ktbhealth.code-workspace` | VSCode multi-root workspace — generated at runtime, gitignored                                                       |
+Everything lives in [`lasius.toml`](lasius.toml):
+
+```toml
+org = "ktbhealth"
+exclude = ["workspace"]   # the metarepo itself is not a member
+```
+
+Repo discovery is automatic — every non-archived repo in the org gets
+cloned. Archive a repo on GitHub to exclude it; add a glob to `exclude`
+for finer control.
 
 ## Bootstrap
 
 ```bash
-bun install
-bun run ktbw init      # clone every org repo into repos/ + generate the workspace file
+# install lasius (until published: from source)
+cargo install lasius
+# or: cargo install --git https://github.com/9aia/lasius
+
+lasius init      # clone every org repo into repos/ + generate the workspace file
 ```
+
+Requires `git` and an authenticated `gh` on PATH.
 
 Open `ktbhealth.code-workspace` in VSCode/Windsurf for the full org.
 
-## CLI
-
-`ktbw` is also published as a bin (`bunx ktbw …` after `bun install`):
-
-- `ktbw init` — bootstrap: clone missing org repos + generate `ktbhealth.code-workspace`
-- `ktbw clone` — clone missing org repos (discovers via `gh repo list ktbhealth`)
-- `ktbw update` — `git pull --ff-only` in every clone
-- `ktbw status` — branch / dirty / ahead-behind matrix
-- `ktbw code-workspace:generate` — regenerate `ktbhealth.code-workspace` from local clones (`workspace` alias)
-
-All commands accept `--root <dir>` (defaults to the metarepo root).
-
-The repo list is auto-discovered — every non-archived repo in the org
-gets cloned. Archive a repo on GitHub to exclude it.
-
-## Development
+## Commands
 
 ```bash
-bun run check       # vp check — fmt + lint + typecheck
-bun run test        # vp test — vitest, 100% coverage gate (unit + integration + e2e)
-bun run typecheck   # tsrs --noEmit per package
-bun run lint        # vp lint
-bun run format      # vp fmt
+lasius clone                     # clone missing org repos
+lasius update                    # git pull --ff-only in every clone
+lasius status                    # branch / dirty / ahead-behind matrix
+lasius code-workspace generate   # regenerate ktbhealth.code-workspace
+lasius doctor                    # env + drift diagnostics
+lasius exec -- <cmd>             # run a command in every clone
+lasius rm <repo>                 # remove a clone after safety checks
 ```
+
+All accept `--root <dir>`; `lasius.toml` is discovered upward from the
+current directory.
 
 ## Repo map
 

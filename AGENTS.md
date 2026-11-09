@@ -1,8 +1,10 @@
 # ktbhealth workspace — agent guide
 
-Metarepo root for the ktbhealth org. All org repositories are cloned
-under `repos/` (gitignored); each is an independent repo with its own
-`AGENTS.md` — read it before working inside.
+Metarepo root for the ktbhealth org. **Config only** — repo management
+is delegated to [lasius](https://github.com/9aia/lasius) via
+`lasius.toml`. All org repositories are cloned under `repos/`
+(gitignored); each is an independent repo with its own `AGENTS.md` —
+read it before working inside.
 
 ## Repo map
 
@@ -35,32 +37,17 @@ under `repos/` (gitignored); each is an independent repo with its own
 - Never edit `node_modules` or generated files (paraglide output,
   `routeTree.gen.ts`, drizzle migrations, `dist/`, `coverage/`).
 
-## This repo's code
-
-Vite+ / bun monorepo (`vp` toolchain, `bun` package manager):
-
-- `packages/core` (`@ktbhealth/workspace-core`) — pure logic on
-  `effect/schema` + `effect/Result` (no platform services): gh JSON
-  decoding, workspace-file generation, `git status --porcelain=v2`
-  parsing/formatting. Unit-tested.
-- `packages/cli` (`@ktbhealth/workspace-cli`) — the `ktbw` CLI:
-  `effect/cli` commands, `effect/process` `ChildProcessSpawner` for
-  `gh`/`git`, `effect/FileSystem` for repo scanning, Node services via
-  `@effect/platform-node`. Integration tests mock the spawner;
-  e2e tests spawn the real `bun bin/ktbw.ts` against fixture repos.
-
-Commands: `bun run check` (fmt+lint+typecheck) · `bun run test`
-(100% coverage gate — unit + integration + e2e) · `bun run typecheck`
-(`tsrs --noEmit` per package). Coverage is enforced at 100% on
-`packages/*/src/**` — new code needs tests.
-
 ## Workspace commands
 
-- `bun run ktbw init` — bootstrap: clone all missing org repos into
-  `repos/` and generate `ktbhealth.code-workspace`
-- `bun run ktbw clone` — clone all missing org repos into `repos/`
-- `bun run ktbw update` — fast-forward pull every clone
-- `bun run ktbw status` — branch / dirty / sync matrix
-- `bun run ktbw code-workspace:generate` — regenerate
-  `ktbhealth.code-workspace` (`workspace` alias)
-- all accept `--root <dir>` (default: metarepo root)
+Managed by [lasius](https://github.com/9aia/lasius) — `lasius.toml`
+is the only config:
+
+- `lasius init` — bootstrap: clone all missing org repos + generate
+  `ktbhealth.code-workspace`
+- `lasius update` — fast-forward pull every clone
+- `lasius status` — branch / dirty / sync matrix (`--json` available)
+- `lasius code-workspace generate` — regenerate the workspace file
+- `lasius doctor` — env + drift diagnostics
+- `lasius exec -- <cmd>` — run a command in every clone
+- `lasius rm <repo>` — remove a clone after safety checks
+- all accept `--root <dir>` (default: `lasius.toml` discovered upward)
