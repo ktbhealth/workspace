@@ -6,16 +6,16 @@ under `repos/` (gitignored); each is an independent repo with its own
 
 ## Repo map
 
-| repo | what it is |
-|---|---|
-| `repos/product` | **KTB Health app** — main monorepo (bun, TanStack Start on Cloudflare). Entry point for product work. |
-| `repos/ui` | `@ktbhealth/ui` design system — Tailwind v4 tokens + React (`@react`) and Vue (`@vue`) component libs. Source of truth for all UI. |
-| `repos/storybook` | Component catalog for `ui`. Check existing stories before building UI (`bun run dev` → :3100). |
-| `repos/project` | myco ledger — proposals, ADRs, tasks across all org repos. Org-wide board. |
-| `repos/website-draft` | Marketing site — TanStack Start SSR on Cloudflare, Paraglide i18n (en/pt-BR/es). |
-| `repos/presentation-draft` | Slidev deck for the HackBrasil talk (pt-BR). |
-| `repos/slidev-theme-ktb` | `@ktbhealth/slidev-theme-ktb` — Slidev theme matching product design tokens. |
-| `repos/.github` | Org profile README + community health files. |
+| repo                       | what it is                                                                                                                         |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `repos/product`            | **KTB Health app** — main monorepo (bun, TanStack Start on Cloudflare). Entry point for product work.                              |
+| `repos/ui`                 | `@ktbhealth/ui` design system — Tailwind v4 tokens + React (`@react`) and Vue (`@vue`) component libs. Source of truth for all UI. |
+| `repos/storybook`          | Component catalog for `ui`. Check existing stories before building UI (`bun run dev` → :3100).                                     |
+| `repos/project`            | myco ledger — proposals, ADRs, tasks across all org repos. Org-wide board.                                                         |
+| `repos/website-draft`      | Marketing site — TanStack Start SSR on Cloudflare, Paraglide i18n (en/pt-BR/es).                                                   |
+| `repos/presentation-draft` | Slidev deck for the HackBrasil talk (pt-BR).                                                                                       |
+| `repos/slidev-theme-ktb`   | `@ktbhealth/slidev-theme-ktb` — Slidev theme matching product design tokens.                                                       |
+| `repos/.github`            | Org profile README + community health files.                                                                                       |
 
 ## Cross-repo rules
 
@@ -35,9 +35,28 @@ under `repos/` (gitignored); each is an independent repo with its own
 - Never edit `node_modules` or generated files (paraglide output,
   `routeTree.gen.ts`, drizzle migrations, `dist/`, `coverage/`).
 
+## This repo's code
+
+Vite+ / bun monorepo (`vp` toolchain, `bun` package manager):
+
+- `packages/core` (`@ktbhealth/workspace-core`) — pure, effect-free-ish
+  logic: gh JSON decoding (`effect/schema`), workspace-file generation,
+  `git status --porcelain=v2` parsing/formatting. Unit-tested.
+- `packages/cli` (`@ktbhealth/workspace-cli`) — the `ktbw` CLI:
+  `effect/cli` commands, `effect/process` `ChildProcessSpawner` for
+  `gh`/`git`, `effect/FileSystem` for repo scanning, Node services via
+  `@effect/platform-node`. Integration tests mock the spawner;
+  e2e tests spawn the real `bun bin/ktbw.ts` against fixture repos.
+
+Commands: `bun run check` (fmt+lint+typecheck) · `bun run test`
+(100% coverage gate — unit + integration + e2e) · `bun run typecheck`
+(`tsrs --noEmit` per package). Coverage is enforced at 100% on
+`packages/*/src/**` — new code needs tests.
+
 ## Workspace commands
 
-- `./script/clone` — clone all missing org repos into `repos/`
-- `./script/update` — fast-forward pull every clone
-- `./script/status` — branch / dirty / sync matrix
-- `./script/workspace` — regenerate `ktbhealth.code-workspace`
+- `bun run ktbw clone` — clone all missing org repos into `repos/`
+- `bun run ktbw update` — fast-forward pull every clone
+- `bun run ktbw status` — branch / dirty / sync matrix
+- `bun run ktbw workspace` — regenerate `ktbhealth.code-workspace`
+- all accept `--root <dir>` (default: metarepo root)

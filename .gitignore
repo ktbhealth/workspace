@@ -4,5 +4,10 @@
 # Local editor state
 /.vscode/
 
+# JS/TS artifacts
+node_modules/
+coverage/
+dist/
+
 # OS noise
 .DS_Store
