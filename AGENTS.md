@@ -56,8 +56,11 @@ Commands: `bun run check` (fmt+lint+typecheck) · `bun run test`
 
 ## Workspace commands
 
+- `bun run ktbw init` — bootstrap: clone all missing org repos into
+  `repos/` and generate `ktbhealth.code-workspace`
 - `bun run ktbw clone` — clone all missing org repos into `repos/`
 - `bun run ktbw update` — fast-forward pull every clone
 - `bun run ktbw status` — branch / dirty / sync matrix
-- `bun run ktbw workspace` — regenerate `ktbhealth.code-workspace`
+- `bun run ktbw code-workspace:generate` — regenerate
+  `ktbhealth.code-workspace` (`workspace` alias)
 - all accept `--root <dir>` (default: metarepo root)

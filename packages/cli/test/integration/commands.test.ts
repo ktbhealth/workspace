@@ -175,6 +175,22 @@ describe("clone", () => {
 		expect(workspace.folders.map((f: { name: string }) => f.name)).toEqual(["ktbhealth", "beta"]);
 	});
 
+	it("init bootstraps clones and the workspace file", async () => {
+		const root = makeRoot();
+		await runWith(["init", "--root", root], (command) => {
+			const text = commandText(command);
+			if (text.startsWith("gh repo list")) {
+				return ok(ghJson([{ name: "alpha", sshUrl: "u", isArchived: false }]));
+			}
+			const target = text.split(" ").at(-1) ?? "";
+			mkdirSync(join(target, ".git"), { recursive: true });
+			return ok("Cloning into 'x'...\n");
+		});
+		expect(existsSync(join(root, "repos", "alpha", ".git"))).toBe(true);
+		const workspace = JSON.parse(readFileSync(join(root, "ktbhealth.code-workspace"), "utf8"));
+		expect(workspace.folders.map((f: { name: string }) => f.name)).toEqual(["ktbhealth", "alpha"]);
+	});
+
 	it("fails when gh exits non-zero", async () => {
 		const root = makeRoot();
 		await expect(
@@ -266,12 +282,12 @@ describe("status", () => {
 	});
 });
 
-describe("workspace", () => {
+describe("code-workspace:generate", () => {
 	it("writes the workspace file for local clones", async () => {
 		const root = makeRoot();
 		addGitRepo(root, "beta");
 		addGitRepo(root, "alpha");
-		await runWith(["workspace", "--root", root], () => ok(""));
+		await runWith(["code-workspace:generate", "--root", root], () => ok(""));
 		const workspace = JSON.parse(readFileSync(join(root, "ktbhealth.code-workspace"), "utf8"));
 		expect(workspace.folders.map((f: { name: string }) => f.name)).toEqual([
 			"ktbhealth",
@@ -282,7 +298,7 @@ describe("workspace", () => {
 
 	it("writes a root-only workspace when repos/ does not exist", async () => {
 		const root = makeRoot();
-		await runWith(["workspace", "--root", root], () => ok(""));
+		await runWith(["code-workspace:generate", "--root", root], () => ok(""));
 		const workspace = JSON.parse(readFileSync(join(root, "ktbhealth.code-workspace"), "utf8"));
 		expect(workspace.folders).toEqual([{ name: "ktbhealth", path: "." }]);
 	});

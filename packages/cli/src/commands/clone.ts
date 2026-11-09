@@ -11,7 +11,7 @@ import {
 	rootFlag,
 } from "../platform.ts";
 
-export const cloneCommand = Command.make("clone", { root: rootFlag }, (config) =>
+export const cloneAll = (config: { readonly root: string }) =>
 	Effect.gen(function* () {
 		const orgRepos = yield* listOrgRepos();
 		const fs = yield* FileSystem.FileSystem;
@@ -55,5 +55,8 @@ export const cloneCommand = Command.make("clone", { root: rootFlag }, (config) =
 				new Error(`failed to clone ${failures.length} repo(s): ${failures.join("; ")}`),
 			);
 		}
-	}),
-).pipe(Command.withDescription("Clone all ktbhealth org repos into repos/"));
+	});
+
+export const cloneCommand = Command.make("clone", { root: rootFlag }, cloneAll).pipe(
+	Command.withDescription("Clone all ktbhealth org repos into repos/"),
+);

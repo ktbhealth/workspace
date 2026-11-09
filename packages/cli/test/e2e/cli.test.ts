@@ -82,7 +82,7 @@ describe("ktbw e2e", () => {
 		expect(update.status).toBe(0);
 		expect(update.stdout).toContain("ok      alpha");
 
-		const workspace = run(["workspace", "--root", root], env);
+		const workspace = run(["code-workspace:generate", "--root", root], env);
 		expect(workspace.status).toBe(0);
 		const parsed = JSON.parse(readFileSync(join(root, "ktbhealth.code-workspace"), "utf8"));
 		expect(parsed.folders.map((f: { name: string }) => f.name)).toEqual([
