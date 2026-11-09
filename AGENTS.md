@@ -39,9 +39,10 @@ under `repos/` (gitignored); each is an independent repo with its own
 
 Vite+ / bun monorepo (`vp` toolchain, `bun` package manager):
 
-- `packages/core` (`@ktbhealth/workspace-core`) — pure, effect-free-ish
-  logic: gh JSON decoding (`effect/schema`), workspace-file generation,
-  `git status --porcelain=v2` parsing/formatting. Unit-tested.
+- `packages/core` (`@ktbhealth/workspace-core`) — pure logic on
+  `effect/schema` + `effect/Result` (no platform services): gh JSON
+  decoding, workspace-file generation, `git status --porcelain=v2`
+  parsing/formatting. Unit-tested.
 - `packages/cli` (`@ktbhealth/workspace-cli`) — the `ktbw` CLI:
   `effect/cli` commands, `effect/process` `ChildProcessSpawner` for
   `gh`/`git`, `effect/FileSystem` for repo scanning, Node services via

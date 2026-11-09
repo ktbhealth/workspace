@@ -30,7 +30,7 @@ export const lastLine = (text: string): string => {
 	return lines[lines.length - 1];
 };
 
-interface CaptureResult {
+export interface CaptureResult {
 	readonly exitCode: number;
 	readonly stdout: string;
 	readonly stderr: string;
@@ -102,7 +102,7 @@ export const listOrgRepos = (): Effect.Effect<
 		Effect.flatMap((result) => {
 			const decoded = decodeRepoList(result.stdout);
 			return Result.isFailure(decoded)
-				? Effect.fail(new Error(`could not parse gh repo list output: ${String(decoded.failure)}`))
+				? Effect.fail(new Error(`could not decode gh repo list output: ${String(decoded.failure)}`))
 				: Effect.succeed(decoded.success);
 		}),
 	);

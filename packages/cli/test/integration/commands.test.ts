@@ -135,6 +135,18 @@ describe("clone", () => {
 		expect(calls.filter((c) => c.startsWith("git clone"))).toHaveLength(0);
 	});
 
+	it("warns instead of crashing when a repo path is a plain file", async () => {
+		const root = makeRoot();
+		mkdirSync(join(root, "repos"), { recursive: true });
+		writeFileSync(join(root, "repos", "gamma"), "not a directory\n");
+		const calls: Array<string> = [];
+		await runWith(["clone", "--root", root], (command) => {
+			calls.push(commandText(command));
+			return ok(ghJson([{ name: "gamma", sshUrl: "u", isArchived: false }]));
+		});
+		expect(calls.filter((c) => c.startsWith("git clone"))).toHaveLength(0);
+	});
+
 	it("fails when gh exits non-zero", async () => {
 		const root = makeRoot();
 		await expect(
@@ -149,7 +161,7 @@ describe("clone", () => {
 	it("fails when gh output is not valid repo JSON", async () => {
 		const root = makeRoot();
 		await expect(runWith(["clone", "--root", root], () => ok("garbage"))).rejects.toThrow(
-			"could not parse gh repo list output",
+			"could not decode gh repo list output",
 		);
 	});
 });
@@ -250,6 +262,22 @@ describe("spawn failures", () => {
 		);
 		await expect(run(["status", "--root", root], failingSpawner)).rejects.toThrow(
 			"git status alpha:",
+		);
+	});
+
+	it("labels update spawn failures per repo", async () => {
+		const root = makeRoot();
+		addGitRepo(root, "alpha");
+		const failingSpawner = Layer.succeed(
+			ChildProcessSpawner.ChildProcessSpawner,
+			ChildProcessSpawner.make(() =>
+				Effect.fail(
+					PlatformError.badArgument({ module: "test", method: "spawn", description: "nope" }),
+				),
+			),
+		);
+		await expect(run(["update", "--root", root], failingSpawner)).rejects.toThrow(
+			"git pull alpha:",
 		);
 	});
 });

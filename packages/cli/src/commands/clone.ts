@@ -22,10 +22,13 @@ export const cloneCommand = Command.make("clone", { root: rootFlag }, (config) =
 		let skipped = 0;
 		for (const repo of orgRepos) {
 			const target = repoDir(config.root, repo.name);
-			if (yield* fs.exists(`${target}/.git`)) {
+			// fs.exists throws ENOTDIR when an intermediate path is a file —
+			// treat probe failures as "absent" so a stray file just warns.
+			const exists = (path: string) => fs.exists(path).pipe(Effect.orElseSucceed(() => false));
+			if (yield* exists(`${target}/.git`)) {
 				yield* Console.log(`skip    ${repo.name} (already cloned)`);
 				skipped += 1;
-			} else if (yield* fs.exists(target)) {
+			} else if (yield* exists(target)) {
 				yield* Console.warn(`warn    ${repo.name} exists but is not a git repo — leaving it alone`);
 			} else {
 				yield* exec(

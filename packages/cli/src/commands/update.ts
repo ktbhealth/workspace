@@ -11,7 +11,7 @@ export const updateCommand = Command.make("update", { root: rootFlag }, (config)
 		for (const name of names) {
 			const result = yield* capture(
 				ChildProcess.make("git", ["-C", repoDir(config.root, name), "pull", "--ff-only"]),
-			);
+			).pipe(Effect.mapError((error) => new Error(`git pull ${name}: ${String(error)}`)));
 			if (result.exitCode === 0) {
 				yield* Console.log(`ok      ${name.padEnd(22)} ${lastLine(result.stdout)}`);
 			} else {

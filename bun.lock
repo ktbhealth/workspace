@@ -5,6 +5,7 @@
     "": {
       "name": "ktbhealth-workspace",
       "devDependencies": {
+        "@ktbhealth/workspace-cli": "workspace:*",
         "@types/node": "^26.0.0",
         "@vitest/coverage-v8": "5.1.0",
         "tsrs": "0.22.0-ts7.1.0-beta",

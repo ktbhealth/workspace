@@ -55,4 +55,9 @@ describe("decodeRepoList", () => {
 		const result = decodeRepoList(JSON.stringify([{ name: "ui", sshUrl: 42, isArchived: false }]));
 		expect(Result.isFailure(result)).toBe(true);
 	});
+
+	it.each([".", "..", "a/b", "has space", ""])("fails on unsafe repo name %j", (name) => {
+		const result = decodeRepoList(JSON.stringify([{ name, sshUrl: "u", isArchived: false }]));
+		expect(Result.isFailure(result)).toBe(true);
+	});
 });
