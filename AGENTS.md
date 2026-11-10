@@ -14,6 +14,7 @@ read it before working inside.
 | `repos/ui`                 | `@ktbhealth/ui` design system — Tailwind v4 tokens + React (`@react`) and Vue (`@vue`) component libs. Source of truth for all UI. |
 | `repos/storybook`          | Component catalog for `ui`. Check existing stories before building UI (`bun run dev` → :3100).                                     |
 | `repos/project`            | myco ledger — proposals, ADRs, tasks across all org repos. Org-wide board.                                                         |
+| `repos/docs`               | Documentation site — Fumadocs on TanStack Start, audience tabs (doctors/patients/developers/business), Cloudflare Workers via Alchemy. |
 | `repos/website-draft`      | Marketing site — TanStack Start SSR on Cloudflare, Paraglide i18n (en/pt-BR/es).                                                   |
 | `repos/presentation-draft` | Slidev deck for the HackBrasil talk (pt-BR).                                                                                       |
 | `repos/slidev-theme-ktb`   | `@ktbhealth/slidev-theme-ktb` — Slidev theme matching product design tokens.                                                       |
