@@ -1,4 +1,5 @@
 org = "ktbhealth"
+include_private = true
 
 [policy]
 remote_must_match_org = true
