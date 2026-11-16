@@ -1,0 +1,105 @@
+/* KTB pastel theme for VitePress — derived from the @ktbhealth/ui
+ * token hue (violet ~259°) at pastel lightness/chroma. Maps the
+ * --vp-c-* custom properties the default theme consumes. */
+
+:root {
+	/* surfaces — soft lavender-tinted neutrals */
+	--vp-c-bg: oklch(0.972 0.008 260);
+	--vp-c-bg-alt: oklch(0.945 0.012 260);
+	--vp-c-bg-elv: oklch(0.995 0.003 260);
+	--vp-c-bg-soft: oklch(0.955 0.015 260);
+
+	/* text — deep slate-violet, still high-contrast */
+	--vp-c-text-1: oklch(0.36 0.03 260);
+	--vp-c-text-2: oklch(0.46 0.025 260);
+	--vp-c-text-3: oklch(0.56 0.02 260);
+
+	/* brand ramp — pastel violet, brand-6 ≈ product primary */
+	--vp-c-brand-1: oklch(0.95 0.03 260);
+	--vp-c-brand-2: oklch(0.9 0.05 260);
+	--vp-c-brand-3: oklch(0.84 0.075 260);
+	--vp-c-brand-4: oklch(0.77 0.095 260);
+	--vp-c-brand-5: oklch(0.69 0.105 260);
+	--vp-c-brand-6: oklch(0.6 0.11 259);
+
+	/* lines + code */
+	--vp-c-border: oklch(0.9 0.015 260);
+	--vp-c-divider: oklch(0.92 0.012 260);
+	--vp-c-gutter: oklch(0.93 0.01 260);
+	--vp-c-code-bg: oklch(0.94 0.015 260);
+	--vp-c-code-block-bg: oklch(0.28 0.03 260);
+
+	/* accents — pastel semantic set */
+	--vp-c-tip-1: oklch(0.95 0.04 160);
+	--vp-c-tip-2: oklch(0.88 0.07 160);
+	--vp-c-tip-3: oklch(0.78 0.09 160);
+	--vp-c-tip-soft: oklch(0.96 0.03 160);
+	--vp-c-warning-1: oklch(0.96 0.05 90);
+	--vp-c-warning-2: oklch(0.9 0.09 90);
+	--vp-c-warning-3: oklch(0.8 0.11 85);
+	--vp-c-warning-soft: oklch(0.97 0.04 95);
+	--vp-c-danger-1: oklch(0.95 0.035 20);
+	--vp-c-danger-2: oklch(0.89 0.07 20);
+	--vp-c-danger-3: oklch(0.79 0.1 22);
+	--vp-c-danger-soft: oklch(0.96 0.03 20);
+	--vp-c-not-1: oklch(0.95 0.03 300);
+	--vp-c-not-2: oklch(0.89 0.06 300);
+	--vp-c-not-3: oklch(0.79 0.09 300);
+	--vp-c-not-soft: oklch(0.96 0.025 300);
+
+	/* homepage hero */
+	--vp-home-hero-name-color: transparent;
+	--vp-home-hero-name-background: linear-gradient(
+		120deg,
+		oklch(0.6 0.11 259),
+		oklch(0.72 0.1 200)
+	);
+	--vp-home-hero-image-background-image: linear-gradient(
+		-45deg,
+		oklch(0.9 0.05 260) 50%,
+		oklch(0.95 0.03 200) 50%
+	);
+	--vp-home-hero-image-filter: blur(44px);
+}
+
+.dark {
+	/* pastel-on-dark: deep tinted surfaces, soft pastel accents */
+	--vp-c-bg: oklch(0.24 0.015 260);
+	--vp-c-bg-alt: oklch(0.28 0.02 260);
+	--vp-c-bg-elv: oklch(0.31 0.02 260);
+	--vp-c-bg-soft: oklch(0.27 0.018 260);
+
+	--vp-c-text-1: oklch(0.93 0.01 260);
+	--vp-c-text-2: oklch(0.82 0.015 260);
+	--vp-c-text-3: oklch(0.68 0.015 260);
+
+	--vp-c-brand-1: oklch(0.35 0.06 260);
+	--vp-c-brand-2: oklch(0.42 0.08 260);
+	--vp-c-brand-3: oklch(0.5 0.09 260);
+	--vp-c-brand-4: oklch(0.58 0.1 260);
+	--vp-c-brand-5: oklch(0.68 0.1 260);
+	--vp-c-brand-6: oklch(0.78 0.09 260);
+
+	--vp-c-border: oklch(0.38 0.02 260);
+	--vp-c-divider: oklch(0.35 0.018 260);
+	--vp-c-gutter: oklch(0.36 0.015 260);
+	--vp-c-code-bg: oklch(0.3 0.02 260);
+	--vp-c-code-block-bg: oklch(0.2 0.02 260);
+
+	--vp-c-tip-1: oklch(0.4 0.06 160);
+	--vp-c-tip-2: oklch(0.55 0.09 160);
+	--vp-c-tip-3: oklch(0.72 0.1 160);
+	--vp-c-tip-soft: oklch(0.3 0.04 160);
+	--vp-c-warning-1: oklch(0.42 0.07 90);
+	--vp-c-warning-2: oklch(0.58 0.1 85);
+	--vp-c-warning-3: oklch(0.75 0.11 85);
+	--vp-c-warning-soft: oklch(0.32 0.05 95);
+	--vp-c-danger-1: oklch(0.4 0.06 20);
+	--vp-c-danger-2: oklch(0.56 0.09 22);
+	--vp-c-danger-3: oklch(0.73 0.1 22);
+	--vp-c-danger-soft: oklch(0.31 0.04 20);
+	--vp-c-not-1: oklch(0.4 0.06 300);
+	--vp-c-not-2: oklch(0.56 0.09 300);
+	--vp-c-not-3: oklch(0.73 0.09 300);
+	--vp-c-not-soft: oklch(0.31 0.04 300);
+}
