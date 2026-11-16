@@ -37,6 +37,10 @@ read it before working inside.
 - English everywhere (code, comments, commit messages).
 - Never edit `node_modules` or generated files (paraglide output,
   `routeTree.gen.ts`, drizzle migrations, `dist/`, `coverage/`).
+- Org LoC reporting: every non-archived repo must appear in
+  `repos/.github/packs/loc/loc.yaml` — `lasius doctor` enforces it
+  (`loc coverage` check). The weekly `loc` workflow publishes the
+  metrics page to `repos/docs`.
 
 ## Workspace commands
 
