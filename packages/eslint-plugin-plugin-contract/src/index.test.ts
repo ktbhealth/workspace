@@ -55,6 +55,22 @@ describe("arch-plugin-contract/plugin-contract", () => {
     expect(reports).toHaveLength(0);
   });
 
+  it("accepts a clientStub entry in client.ts", () => {
+    const reports = runProgram("/repo/plugins/demo/src/client.ts", [
+      importDecl("@ktb/kernel", [{ imported: "clientStub", local: "clientStub" }]),
+      exportConst("plugins", { type: "ArrayExpression", elements: [callExpr("clientStub")] }),
+    ]);
+    expect(reports).toHaveLength(0);
+  });
+
+  it("rejects a clientStub entry in index.ts", () => {
+    const reports = runProgram("/repo/plugins/demo/src/index.ts", [
+      importDecl("@ktb/kernel", [{ imported: "clientStub", local: "clientStub" }]),
+      exportConst("plugins", { type: "ArrayExpression", elements: [callExpr("clientStub")] }),
+    ]);
+    expect(reports).toHaveLength(1);
+  });
+
   it("flags missing/empty plugins export", () => {
     const reports = runProgram("/repo/plugins/demo/src/index.ts", [
       exportConst("plugins", { type: "ArrayExpression", elements: [] }),

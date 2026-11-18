@@ -7,8 +7,9 @@
  * Each plugin's entry file (`plugins/<pkg>/src/index.ts` or
  * `src/client.ts`) must export `plugins` — a non-empty array of
  * single-concern plugins each initialized with `definePlugin({...})`
- * imported from the kernel package — so the host's filesystem plugin
- * discovery keeps working.
+ * (or the server-only `clientStub({...})` mirror marker, T-149, in
+ * `client.ts` only) imported from the kernel package — so the host's
+ * filesystem plugin discovery keeps working.
  *
  * Enable per-glob via `lint.jsPlugins` + `lint.overrides` — the rule
  * self-filters to `plugins/<pkg>/src/{index,client}.ts`.
@@ -23,6 +24,7 @@ type Visitor = Record<string, ((node: AstNode) => void) | undefined>;
 type Rule = { create: (context: RuleContext) => Visitor };
 
 const PLUGIN_ENTRY_RE = /(?:^|[/\\])plugins[/\\][^/\\]+[/\\]src[/\\](?:index|client)\.ts$/;
+const CLIENT_ENTRY_RE = /(?:^|[/\\])client\.ts$/;
 const KERNEL = "@ktb/kernel";
 
 const importedName = (spec: any) => spec.imported?.name ?? spec.imported?.value;
@@ -87,12 +89,14 @@ const exportedNames = (program: any) => {
 };
 
 /**
- * Whether `init` is a `definePlugin({...})` call with `definePlugin`
- * imported from the kernel package.
+ * Whether `init` is a kernel entry-factory call — `definePlugin({...})`
+ * anywhere, or `clientStub({...})` in `client.ts` mirrors (T-149) —
+ * with the callee imported from the kernel package.
  */
-const isDefinePluginInit = (
+const isEntryInit = (
   init: any,
   imports: Map<string, { source: string; imported: string }>,
+  isClientEntry: boolean,
 ) => {
   const callee = init?.type === "CallExpression" ? init.callee : undefined;
   if (
@@ -103,7 +107,8 @@ const isDefinePluginInit = (
     return false;
   }
   const binding = imports.get(callee.name);
-  return binding?.source === KERNEL && binding.imported === "definePlugin";
+  if (binding?.source !== KERNEL) return false;
+  return binding.imported === "definePlugin" || (isClientEntry && binding.imported === "clientStub");
 };
 
 const pluginContract: Rule = {
@@ -111,6 +116,7 @@ const pluginContract: Rule = {
     return {
       Program(node: AstNode) {
         if (!PLUGIN_ENTRY_RE.test(context.filename)) return;
+        const isClientEntry = CLIENT_ENTRY_RE.test(context.filename);
 
         const imports = namedImports(node);
         const decls = topLevelDeclarators(node);
@@ -126,25 +132,25 @@ const pluginContract: Rule = {
           context.report({
             node,
             message:
-              "plugin entry must export `plugins` — a non-empty array of `definePlugin({...})` plugins for host discovery (arch-plugin-contract/plugin-contract)",
+              "plugin entry must export `plugins` — a non-empty array of `definePlugin({...})` (or `clientStub({...})` in client.ts) plugins for host discovery (arch-plugin-contract/plugin-contract)",
           });
           return;
         }
 
         for (const el of elements) {
-          // Each element is either an inline `definePlugin({...})`
-          // call or a const bound to one.
+          // Each element is either an inline entry-factory call or a
+          // const bound to one.
           const init =
             el?.type === "Identifier"
               ? decls.get(el.name)?.init
               : el?.type === "CallExpression"
                 ? el
                 : undefined;
-          if (init === undefined || !isDefinePluginInit(init, imports)) {
+          if (init === undefined || !isEntryInit(init, imports, isClientEntry)) {
             context.report({
               node: el ?? node,
               message:
-                '`plugins` entries must be `definePlugin({...})` calls or consts initialized with `definePlugin` imported from "@ktb/kernel" (arch-plugin-contract/plugin-contract)',
+                '`plugins` entries must be `definePlugin({...})` calls (or `clientStub({...})` in client.ts) or consts initialized with them imported from "@ktb/kernel" (arch-plugin-contract/plugin-contract)',
             });
           }
         }
