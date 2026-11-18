@@ -36,7 +36,7 @@ jobs:
       - uses: pulumi/actions@v6
         with:
           only-install: true
-      - run: pulumi preview
+      - run: pulumi preview --stack prod
 
   up:
     if: github.event_name != 'pull_request'
