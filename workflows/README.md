@@ -20,9 +20,10 @@ Every bundle is a directory with the same four files:
 
 ## Installing a bundle
 
-1. **Secrets** — names only, values in `~/.config/peregrin/env`: the
-   bundle's `capabilities.secrets` entries (typically `PEREGRIN_TOKEN`
-   + a per-repo `BUPHA_WH_<OWNER>_<REPO>` webhook HMAC).
+1. **Secrets** — names only; values resolve cuora-first
+   (`cuora put cuora://peregrin/<NAME>`), with `~/.config/peregrin/env`
+   as a fallback leg. Typical entries: `PEREGRIN_TOKEN` + a per-repo
+   `BUPHA_WH_<OWNER>_<REPO>` webhook HMAC.
 2. **Ingress** — if the bundle has a `github-webhook` node, register a
    GitHub webhook on the repo pointing at the shared listener's public
    URL (`https://tamias.luisfuturist.com/hook`) with the event types
@@ -34,7 +35,8 @@ Every bundle is a directory with the same four files:
 4. **Configure** — set the bundle's REQUIRED `config:` keys in that
    rendered file (`repo`, `webhook_secret_env`, `checkout`, … — each
    bundle's `params.schema.json` says which). If a secret name isn't
-   in the env file, add it under `capabilities.secrets` there too.
+   in cuora yet, `cuora put` it and list it under
+   `capabilities.secrets` in the bundle too.
 5. **Restart** — `systemctl --user restart peregrin-campaign` (all
    peregrin bundles share the one service).
 
@@ -48,7 +50,8 @@ owns event routing · tamias owns distribution/services · bupha (9aia
 org only) owns CI-job execution. No raw `git`/`gh`/agent CLIs in
 `main.yaml` — git/forge goes through `lasius` (shell) or
 `driver: ops` → `tamias serve` → `tamias-driver-*`; agent sessions go
-through the node's `/api/sessions/run`.
+through `driver: ops` → `sessions.*` on `tamias-driver-sepia` (the
+node's `/api/sessions/run` remains for HTTP callers).
 
 ## Ops
 
