@@ -167,13 +167,13 @@ export const IMPL_IMPORT_PATTERNS = [
 /**
  * Provider-literal exemptions for product(): deliberate product
  * surfaces, not port leakage — the theme plugin's font pipeline
- * fetches fonts.googleapis.com css2 by design, and the ai-endpoints
+ * fetches fonts.googleapis.com css2 by design, and the ai-provider
  * console ships known LLM baseUrls as pickable presets.
  */
 export const PROVIDER_LOCKIN_EXEMPTIONS = [
   "plugins/theme/src/assets.ts",
   "plugins/theme/src/present.ts",
-  "plugins/ai-endpoints/src/views/EndpointsPage.tsx",
+  "plugins/ai-provider/src/views/EndpointsPage.tsx",
 ] as const;
 
 /* ------------------------------------------------------------------ */

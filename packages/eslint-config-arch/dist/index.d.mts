@@ -31,10 +31,10 @@ export declare const IMPL_IMPORT_PATTERNS: string[];
 /**
  * Provider-literal exemptions for product(): deliberate product
  * surfaces, not port leakage — the theme plugin's font pipeline
- * fetches fonts.googleapis.com css2 by design, and the ai-endpoints
+ * fetches fonts.googleapis.com css2 by design, and the ai-provider
  * console ships known LLM baseUrls as pickable presets.
  */
-export declare const PROVIDER_LOCKIN_EXEMPTIONS: readonly ["plugins/theme/src/assets.ts", "plugins/theme/src/present.ts", "plugins/ai-endpoints/src/views/EndpointsPage.tsx"];
+export declare const PROVIDER_LOCKIN_EXEMPTIONS: readonly ["plugins/theme/src/assets.ts", "plugins/theme/src/present.ts", "plugins/ai-provider/src/views/EndpointsPage.tsx"];
 /** Fragment consumers spread into their oxlint `lint` config. The
  * override/plugin shapes are oxlint's own types (re-exported through
  * `vite-plus/lint`) so the fragment drops into `defineConfig` without
