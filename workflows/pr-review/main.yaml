@@ -410,74 +410,20 @@ nodes:
       default: "pr-review.agent.failed.${event.match.1}"
     timeout: 120
 
-# --- review: sessions.create — session in the review worktree ----------
-- id: pr-review.agent.create
-  driver: ops
-  on:
-  - pr-review.agent.prompt.ready.*
-  emits:
-  - pr-review.agent.created.*
-  - pr-review.agent.failed.*
-  max_fires: unlimited
-  retry:
-    max_attempts: 3
-    delay: 5000
-    backoff: fixed
-  params:
-    driver: sepia
-    query: sessions.create
-    params:
-      cwd: "${config.worktree_base}/${event.match.1}"
-      agent: "${config.agent}"
-      title: "pr-review @ ${event.match.1}"
-    # Forward the prompt (payload.stdout) to the next hop; the
-    # session id is already in payload.result.data.id.
-    echo: ["stdout"]
-    emit:
-      success: "pr-review.agent.created.${event.match.1}"
-      failure: "pr-review.agent.failed.${event.match.1}"
-    timeout: 120
-
-# --- review: sessions.set_mode — unattended-turn mode -------------------
-# REQUIRED before prompt: devin's default accept-edits prompts on exec
-# and nothing answers — the turn deadlocks. echo carries BOTH the
-# prompt (stdout) and the session id (result.data.id) forward.
-- id: pr-review.agent.mode
-  driver: ops
-  on:
-  - pr-review.agent.created.*
-  emits:
-  - pr-review.agent.mode.set.*
-  - pr-review.agent.failed.*
-  max_fires: unlimited
-  retry:
-    max_attempts: 3
-    delay: 5000
-    backoff: fixed
-  params:
-    driver: sepia
-    query: sessions.set_mode
-    params:
-      id: "${event.payload.result.data.id}"
-      agent: "${config.agent}"
-      mode: "${config.agent_mode}"
-    echo: ["stdout", "result.data.id"]
-    emit:
-      success: "pr-review.agent.mode.set.${event.match.1}"
-      failure: "pr-review.agent.failed.${event.match.1}"
-    timeout: 120
-
-# --- review: sessions.prompt_wait — blocking turn -----------------------
-# timeoutMs 1740000 (29min) stays under tamias serve's 30min
-# driver.query clamp (the ops `timeout` below forwards as timeout_ms
-# and is clamped there), so a timed-out turn returns its
-# PromptWaitResult — timedOut:true — BEFORE the wire deadline
-# kills the child; the gate node fails it honestly. Old flow was
-# timeoutMs 1800000 under a 1900s curl / 2000s node bound.
+# --- review: sessions.run — ensure+mode+prompt_wait in ONE call ----
+# driver: ops spawns a fresh `sepia serve` per query, so session
+# state cannot cross calls — create/set_mode/prompt_wait as separate
+# ops nodes failed with "Session is not attached". sessions.run does
+# ensure-session (create by cwd+agent) + set_mode + blocking
+# prompt_wait inside a single serve dispatch. timeoutMs 1740000
+# (29min) stays under tamias serve's 30min driver.query clamp (the
+# ops `timeout` below forwards as timeout_ms and is clamped there),
+# so a timed-out turn returns timedOut:true BEFORE the wire kills
+# the child; the gate node fails it honestly.
 - id: pr-review.agent.run
   driver: ops
   on:
-  - pr-review.agent.mode.set.*
+  - pr-review.agent.prompt.ready.*
   emits:
   - pr-review.agent.turn.*
   - pr-review.agent.failed.*
@@ -488,10 +434,12 @@ nodes:
     backoff: fixed
   params:
     driver: sepia
-    query: sessions.prompt_wait
+    query: sessions.run
     params:
-      id: "${event.payload.result.data.id}"
+      cwd: "${config.worktree_base}/${event.match.1}"
       agent: "${config.agent}"
+      title: "pr-review @ ${event.match.1}"
+      mode: "${config.agent_mode}"
       text: "${event.payload.stdout}"
       timeoutMs: 1740000
     emit:
@@ -530,9 +478,9 @@ nodes:
 
 # --- cleanup: agent chain failed before/at the wire — release lock -
 # agent.failed.* covers prep-node failures (its trap already released
-# — rmdir is idempotent), ops wire failures (create/mode/
-# prompt_wait ok:false — the gate never ran, lock still held), and
-# gate failures (already released). agent.busy.* is deliberately NOT
+# — rmdir is idempotent), the sessions.run wire failure (ok:false —
+# the gate never ran, lock still held), and gate failures (already
+# released). agent.busy.* is deliberately NOT
 # here: a busy lock belongs to the in-flight chain.
 - id: pr-review.cleanup.agentfail
   driver: shell
