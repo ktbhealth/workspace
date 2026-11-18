@@ -101,6 +101,14 @@ No raw `git`/`gh`/`devin` anywhere in `main.yaml`.
 - **Verified-sha merge** — merge only fires when an open PR's _current_
   `head_sha` equals the sha that produced the CI signal. Stale signals
   find no PR and skip.
+- **Push-after-merge guard** — before pushing, the push node re-lists
+  open PRs and requires one whose `head_sha` still matches; a PR merged
+  (or head moved) while the agent ran emits `push.skipped` instead of
+  orphaning a commit on a dead branch.
+- **CI pre-filter** — `ci.route` drops check/status deliveries whose sha
+  isn't any open PR's head (`ci.ignored`, one `forge pr list` per event,
+  fails open on forge errors), so main-branch CI never reaches the merge
+  node as `merge.skipped` noise.
 - **All-checks-green gate** — `lasius forge pr checks` must report a
   non-empty rollup where every check's verdict is
   `SUCCESS`/`NEUTRAL`/`SKIPPED`; pending or failed blocks
