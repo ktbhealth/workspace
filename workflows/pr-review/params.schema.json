@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "pr-review params",
+  "type": "object",
+  "properties": {
+    "repo": {
+      "type": "string",
+      "description": "Watched repository as owner/name — REQUIRED per deployment. Drives the webhook repo filter and the ci-signal repo check.",
+      "default": ""
+    },
+    "webhook_secret_env": {
+      "type": "string",
+      "description": "Env var holding this repo's webhook HMAC secret — the BUPHA_WH_<OWNER>_<REPO> convention (uppercased, '-' → '_'). REQUIRED per deployment; the var must exist in the campaign service env (~/.config/peregrin/env or cuora).",
+      "default": ""
+    },
+    "checkout": {
+      "type": "string",
+      "description": "Local clone path lasius operates on — REQUIRED per deployment.",
+      "default": ""
+    },
+    "worktree_base": {
+      "type": "string",
+      "description": "Detached review worktrees, the per-PR attempt ledger, and the per-sha PR map land here.",
+      "default": "$HOME/.local/share/pr-review/worktrees"
+    },
+    "agent": {
+      "type": "string",
+      "description": "sepia agent-config id for review sessions.",
+      "default": "devin"
+    },
+    "agent_mode": {
+      "type": "string",
+      "description": "ACP session mode applied after create (session/set_mode). REQUIRED for unattended runs — devin's default accept-edits prompts on exec and deadlocks. 'bypass' auto-approves all tools; 'smart' auto-runs model-judged-safe actions; 'accept-edits' only auto-approves edits.",
+      "default": "bypass"
+    },
+    "max_review_attempts": {
+      "type": "integer",
+      "description": "Per-PR cap on agent review attempts — counted in <worktree_base>/attempts/pr-<n>-reviews, durable across restarts.",
+      "default": 2
+    },
+    "verify_cmd": {
+      "type": "string",
+      "description": "Verification command embedded in the agent prompt — the agent runs it inside the worktree; the campaign does not execute it.",
+      "default": "bun run check"
+    },
+    "merge_method": {
+      "type": "string",
+      "description": "Merge method passed to `lasius forge pr merge` (--method).",
+      "default": "squash"
+    },
+    "lasius_root": {
+      "type": "string",
+      "description": "lasius workspace root (--root flag); repo args are checkout paths so any lasius.toml workspace works.",
+      "default": "/home/luis/GitHub/ktbhealth"
+    }
+  },
+  "additionalProperties": true
+}

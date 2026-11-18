@@ -18,3 +18,6 @@ docs/
 
 # Lint plugin packages ship built output — oxlint jsPlugins consume plain JS.
 !packages/eslint-*/dist/
+
+# Linked git worktrees (e.g. worktrees/docs, worktrees/pr-review)
+/worktrees/

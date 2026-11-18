@@ -1,0 +1,44 @@
+# pr-review — pull_request → sepia agent review + adjust → push →
+# verified-green checks → squash merge. Tamias bundle
+# (`type: peregrin-bundle`); ktbhealth counterpart of 9aia's pr-heal,
+# using forge check/status webhook deliveries as the CI signal
+# (GitHub Actions — no bupha fleet on this org).
+#
+# Boundaries: lasius owns every git/forge call, sepia owns the agent
+# session (sessions.create/set_mode/prompt_wait ops queries),
+# peregrin owns only event routing, tamias distributes.
+name: pr-review
+version: "0.1.0"
+type: peregrin-bundle
+description: >-
+  PR opened/updated → sepia agent reviews the diff and applies
+  needed adjustments in a lasius worktree → commit+push → on every
+  check green (`lasius forge pr checks`) the campaign squash-merges
+  via lasius forge. Event-driven off GitHub webhooks; per-PR review
+  ledger; verified-sha merge gate; fork PRs skipped.
+
+provider:
+  # SHARED provider identity — same as every peregrin-bundle: all
+  # bundles render services into the ONE peregrin-campaign.service
+  # hosting ~/.config/peregrin/serve/*.yaml on the shared webhook
+  # listener. Keep `exec` identical.
+  name: peregrin
+  services:
+    - name: campaign
+      exec: >-
+        ~/.local/bin/peregrin campaign serve ~/.config/peregrin/serve
+        --listen 127.0.0.1:29173 --path /hook
+        --history-dir ~/.local/share/peregrin/serve-history
+        --queue-store-dir ~/.local/share/peregrin/serve-queues
+      env_file: "~/.config/peregrin/env"
+      workdir: "~"
+      restart: on-failure
+  ingress:
+    # Advisory only — the GitHub webhook is registered per repo
+    # against the shared listener's LIVE public URL. No hooks[] —
+    # registration is an operator step (see README).
+    - public_url: https://tamias.luisfuturist.com
+      listen: 127.0.0.1:29173
+      path: /hook
+      hooks: []
+  verbs: [run, logs]

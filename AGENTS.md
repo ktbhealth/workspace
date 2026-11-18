@@ -20,6 +20,11 @@ read it before working inside.
 | `repos/slidev-theme-ktb`   | `@ktbhealth/slidev-theme-ktb` — Slidev theme matching product design tokens.                                                           |
 | `repos/.github`            | Org profile README + community health files.                                                                                           |
 
+Org-level shared content lives at the workspace root: `workflows/`
+(peregrin campaign bundles — e.g. `pr-review`, agent-driven PR
+review → adjust → merge-on-green), and `repos/.github` (org profile +
+community health).
+
 ## Cross-repo rules
 
 - Sibling clones live at `repos/<name>`; references like `../ui`
