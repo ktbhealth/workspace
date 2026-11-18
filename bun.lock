@@ -12,7 +12,7 @@
     },
     "packages/eslint-config-arch": {
       "name": "eslint-config-arch",
-      "version": "0.1.0",
+      "version": "0.1.3",
       "devDependencies": {
         "typescript": "^6.0.2",
         "vite-plus": "1.5.1",
@@ -21,7 +21,7 @@
     },
     "packages/eslint-plugin-arch": {
       "name": "eslint-plugin-arch",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "devDependencies": {
         "typescript": "^6.0.2",
         "vite-plus": "1.5.1",
@@ -30,7 +30,7 @@
     },
     "packages/eslint-plugin-client-contract": {
       "name": "eslint-plugin-client-contract",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "devDependencies": {
         "typescript": "^6.0.2",
         "vite-plus": "1.5.1",
