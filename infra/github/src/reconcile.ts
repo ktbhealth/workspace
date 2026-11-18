@@ -17,47 +17,47 @@ import { MANAGED_REPO_NAMES } from "./repos.ts";
 const ORG = "ktbhealth";
 
 const ghApi = (args: string[]): string =>
-	execFileSync("gh", ["api", ...args], { encoding: "utf8" });
+  execFileSync("gh", ["api", ...args], { encoding: "utf8" });
 
 const listOrgRepos = (): string[] => {
-	const out = ghApi([`orgs/${ORG}/repos`, "--paginate", "--jq", ".[].name"]);
-	return out
-		.split("\n")
-		.map((line) => line.trim())
-		.filter(Boolean);
+  const out = ghApi([`orgs/${ORG}/repos`, "--paginate", "--jq", ".[].name"]);
+  return out
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 };
 
 const main = (): number => {
-	const managed = new Set(MANAGED_REPO_NAMES);
-	const orgRepos = listOrgRepos();
-	const unmanaged = orgRepos.filter((name) => !managed.has(name));
+  const managed = new Set(MANAGED_REPO_NAMES);
+  const orgRepos = listOrgRepos();
+  const unmanaged = orgRepos.filter((name) => !managed.has(name));
 
-	if (unmanaged.length === 0) {
-		console.log(`All ${orgRepos.length} org repos are managed by infra/github.`);
-		return 0;
-	}
+  if (unmanaged.length === 0) {
+    console.log(`All ${orgRepos.length} org repos are managed by infra/github.`);
+    return 0;
+  }
 
-	for (const name of unmanaged) {
-		console.log(`unmanaged repo ${ORG}/${name} — applying baseline squash-only policy`);
-		ghApi([
-			"-X",
-			"PATCH",
-			`repos/${ORG}/${name}`,
-			"-F",
-			"allow_squash_merge=true",
-			"-F",
-			"allow_merge_commit=false",
-			"-F",
-			"allow_rebase_merge=false",
-		]);
-	}
+  for (const name of unmanaged) {
+    console.log(`unmanaged repo ${ORG}/${name} — applying baseline squash-only policy`);
+    ghApi([
+      "-X",
+      "PATCH",
+      `repos/${ORG}/${name}`,
+      "-F",
+      "allow_squash_merge=true",
+      "-F",
+      "allow_merge_commit=false",
+      "-F",
+      "allow_rebase_merge=false",
+    ]);
+  }
 
-	console.error(
-		`\n${unmanaged.length} unmanaged repo(s): ${unmanaged.join(", ")}\n` +
-			"Decide per repo: add to infra/github/src/repos.ts (managed) or leave on the baseline.\n" +
-			"This script will keep patching them on every CI run until then.",
-	);
-	return 1;
+  console.error(
+    `\n${unmanaged.length} unmanaged repo(s): ${unmanaged.join(", ")}\n` +
+      "Decide per repo: add to infra/github/src/repos.ts (managed) or leave on the baseline.\n" +
+      "This script will keep patching them on every CI run until then.",
+  );
+  return 1;
 };
 
 process.exit(main());

@@ -20,24 +20,24 @@
  *   policy, everything else is left to GitHub defaults.
  */
 export interface RepoSpec {
-	readonly name: string;
-	readonly hasIssues: boolean;
-	readonly hasWiki: boolean;
-	readonly hasProjects: boolean;
+  readonly name: string;
+  readonly hasIssues: boolean;
+  readonly hasWiki: boolean;
+  readonly hasProjects: boolean;
 }
 
 export const REPOS: readonly RepoSpec[] = [
-	{ name: "product", hasIssues: true, hasWiki: true, hasProjects: true },
-	{ name: "ui", hasIssues: true, hasWiki: true, hasProjects: true },
-	{ name: "storybook", hasIssues: true, hasWiki: true, hasProjects: true },
-	{ name: "project", hasIssues: true, hasWiki: true, hasProjects: true },
-	{ name: "docs", hasIssues: true, hasWiki: true, hasProjects: true },
-	{ name: "slidev-theme-ktb", hasIssues: true, hasWiki: true, hasProjects: true },
-	{ name: ".github", hasIssues: true, hasWiki: true, hasProjects: true },
-	{ name: "workspace", hasIssues: true, hasWiki: true, hasProjects: true },
-	// Currently private — flipped public intentionally (see header).
-	{ name: "website-draft", hasIssues: true, hasWiki: false, hasProjects: true },
-	{ name: "presentation-draft", hasIssues: true, hasWiki: false, hasProjects: true },
+  { name: "product", hasIssues: true, hasWiki: true, hasProjects: true },
+  { name: "ui", hasIssues: true, hasWiki: true, hasProjects: true },
+  { name: "storybook", hasIssues: true, hasWiki: true, hasProjects: true },
+  { name: "project", hasIssues: true, hasWiki: true, hasProjects: true },
+  { name: "docs", hasIssues: true, hasWiki: true, hasProjects: true },
+  { name: "slidev-theme-ktb", hasIssues: true, hasWiki: true, hasProjects: true },
+  { name: ".github", hasIssues: true, hasWiki: true, hasProjects: true },
+  { name: "workspace", hasIssues: true, hasWiki: true, hasProjects: true },
+  // Currently private — flipped public intentionally (see header).
+  { name: "website-draft", hasIssues: true, hasWiki: false, hasProjects: true },
+  { name: "presentation-draft", hasIssues: true, hasWiki: false, hasProjects: true },
 ];
 
 export const MANAGED_REPO_NAMES: readonly string[] = REPOS.map((repo) => repo.name);

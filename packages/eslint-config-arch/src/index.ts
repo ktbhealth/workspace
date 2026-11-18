@@ -192,14 +192,14 @@ export interface ArchLintFragment {
 const PLUGIN_SPECIFIER = "eslint-plugin-arch";
 
 const jsPluginsFor = (specifier = PLUGIN_SPECIFIER): ExternalPluginEntry[] => [
-	{ name: "arch", specifier },
+  { name: "arch", specifier },
 ];
 
 interface SpecifierOption {
-	/** Module specifier oxlint resolves for `eslint-plugin-arch` —
-	 * override when the package is installed under a different
-	 * name/subpath (e.g. `@ktbhealth/workspace/eslint-plugin-arch`). */
-	pluginSpecifier?: string;
+  /** Module specifier oxlint resolves for `eslint-plugin-arch` —
+   * override when the package is installed under a different
+   * name/subpath (e.g. `@ktbhealth/workspace/eslint-plugin-arch`). */
+  pluginSpecifier?: string;
 }
 
 /* ------------------------------------------------------------------ */

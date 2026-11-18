@@ -108,7 +108,9 @@ const isEntryInit = (
   }
   const binding = imports.get(callee.name);
   if (binding?.source !== KERNEL) return false;
-  return binding.imported === "definePlugin" || (isClientEntry && binding.imported === "clientStub");
+  return (
+    binding.imported === "definePlugin" || (isClientEntry && binding.imported === "clientStub")
+  );
 };
 
 const pluginContract: Rule = {
