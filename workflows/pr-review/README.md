@@ -11,7 +11,7 @@ worktree at the PR head, reviews the diff against the base branch,
 applies the adjustments that are actually needed, and leaves the tree
 dirty; the campaign commits and pushes through lasius. GitHub
 `check_run`/`check_suite`/`status` webhook deliveries then drive the
-merge: once an open PR's *current* head sha has every check green on
+merge: once an open PR's _current_ head sha has every check green on
 `lasius forge pr checks`, the campaign squash-merges through lasius
 forge.
 
@@ -44,13 +44,13 @@ check rollup, not a `ci.job.completed` inject.
 
 ## Boundaries
 
-| concern | owner |
-| --- | --- |
-| git / forge (worktree, commit, push, PR, merge, checks) | lasius |
-| agent session (create, prompt_wait, set_mode) | sepia — via `sessions.*` ops queries, NOT the node's `/api/sessions/run` (see caveat below) |
-| orchestration, routing, policy | peregrin |
-| webhook verification + event normalization | peregrin `github-webhook` driver |
-| distribution, shims, services | tamias |
+| concern                                                 | owner                                                                                       |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| git / forge (worktree, commit, push, PR, merge, checks) | lasius                                                                                      |
+| agent session (create, prompt_wait, set_mode)           | sepia — via `sessions.*` ops queries, NOT the node's `/api/sessions/run` (see caveat below) |
+| orchestration, routing, policy                          | peregrin                                                                                    |
+| webhook verification + event normalization              | peregrin `github-webhook` driver                                                            |
+| distribution, shims, services                           | tamias                                                                                      |
 
 No raw `git`/`gh`/`devin` anywhere in `main.yaml`.
 
@@ -73,16 +73,16 @@ No raw `git`/`gh`/`devin` anywhere in `main.yaml`.
    deep-merges it over the bundle defaults (outer keys win). Set the
    per-deployment values there:
 
-   | key | required | meaning |
-   | --- | --- | --- |
-   | `repo` | yes | `owner/name` watched repo |
-   | `webhook_secret_env` | yes | env var name holding the HMAC |
-   | `checkout` | yes | local clone lasius operates on |
-   | `agent` / `agent_mode` | no | sepia agent id + ACP mode (`bypass` default — see below) |
-   | `max_review_attempts` | no | per-PR review cap (default 2, durable ledger) |
-   | `verify_cmd` | no | check the agent must leave passing (default `bun run check`) |
-   | `merge_method` | no | `lasius forge pr merge --method` (default `squash`) |
-   | `worktree_base`, `lasius_root` | no | paths (must be absolute — ops params get no shell `$HOME` expansion) |
+   | key                            | required | meaning                                                              |
+   | ------------------------------ | -------- | -------------------------------------------------------------------- |
+   | `repo`                         | yes      | `owner/name` watched repo                                            |
+   | `webhook_secret_env`           | yes      | env var name holding the HMAC                                        |
+   | `checkout`                     | yes      | local clone lasius operates on                                       |
+   | `agent` / `agent_mode`         | no       | sepia agent id + ACP mode (`bypass` default — see below)             |
+   | `max_review_attempts`          | no       | per-PR review cap (default 2, durable ledger)                        |
+   | `verify_cmd`                   | no       | check the agent must leave passing (default `bun run check`)         |
+   | `merge_method`                 | no       | `lasius forge pr merge --method` (default `squash`)                  |
+   | `worktree_base`, `lasius_root` | no       | paths (must be absolute — ops params get no shell `$HOME` expansion) |
 
    If the webhook secret env var isn't in `~/.config/peregrin/env`,
    also add its name under `capabilities.secrets` in the same file
@@ -98,7 +98,7 @@ No raw `git`/`gh`/`devin` anywhere in `main.yaml`.
 
 ## Safety model
 
-- **Verified-sha merge** — merge only fires when an open PR's *current*
+- **Verified-sha merge** — merge only fires when an open PR's _current_
   `head_sha` equals the sha that produced the CI signal. Stale signals
   find no PR and skip.
 - **All-checks-green gate** — `lasius forge pr checks` must report a

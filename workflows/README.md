@@ -3,26 +3,26 @@
 Peregrin campaign bundles for ktbhealth repos — event-driven
 automation (agent sessions, CI gates, forge ops) installed via tamias.
 
-| bundle | what it does |
-| --- | --- |
+| bundle                     | what it does                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------- |
 | [`pr-review/`](pr-review/) | PR opened/updated → sepia agent reviews + adjusts → verified-green checks → squash merge |
 
 ## Bundle anatomy
 
 Every bundle is a directory with the same four files:
 
-| file | role |
-| --- | --- |
-| `main.yaml` | the campaign — nodes, drivers, event routing, `config:` knobs |
-| `tamias.yaml` | bundle manifest (`type: peregrin-bundle`) + provider/service render spec |
-| `params.schema.json` | operator-facing config schema (documents every `config:` key) |
-| `README.md` | bundle-specifics only — behavior, safety model, ops. Generic install steps live HERE. |
+| file                 | role                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| `main.yaml`          | the campaign — nodes, drivers, event routing, `config:` knobs                         |
+| `tamias.yaml`        | bundle manifest (`type: peregrin-bundle`) + provider/service render spec              |
+| `params.schema.json` | operator-facing config schema (documents every `config:` key)                         |
+| `README.md`          | bundle-specifics only — behavior, safety model, ops. Generic install steps live HERE. |
 
 ## Installing a bundle
 
 1. **Secrets** — names only, values in `~/.config/peregrin/env`: the
    bundle's `capabilities.secrets` entries (typically `PEREGRIN_TOKEN`
-   + a per-repo `BUPHA_WH_<OWNER>_<REPO>` webhook HMAC).
+   - a per-repo `BUPHA_WH_<OWNER>_<REPO>` webhook HMAC).
 2. **Ingress** — if the bundle has a `github-webhook` node, register a
    GitHub webhook on the repo pointing at the shared listener's public
    URL (`https://tamias.luisfuturist.com/hook`) with the event types
