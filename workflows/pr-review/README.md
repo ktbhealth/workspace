@@ -18,6 +18,19 @@ Unlike `pr-heal` there is no bupha on this org — CI completion arrives
 as ordinary forge webhook deliveries and the merge gate is the live
 check rollup, not a `ci.job.completed` inject.
 
+## Requirements
+
+- **peregrin ≥ the `driver: ops` merge** — the worktree/commit nodes
+  use `driver: ops` (peregrin main `d27ca7b` or later; not yet in a
+  tamias release). Older peregrin builds reject the bundle.
+- **tamias ≥ `662daeb`** — each ops node spawns `tamias serve` and
+  sends one `driver.query`; the serve must know the `driver.*` ops.
+- **`tamias` on the campaign service's PATH** — ops nodes spawn
+  `tamias serve` (default `serve_argv`); same PATH requirement the
+  shell nodes already have for `lasius`/`jq`/`curl`.
+- `lasius` new enough to serve the `cli.vcs.*` ops manifest queries
+  (`vcs.fetch`, `vcs.worktree.add/remove`, `vcs.commit`).
+
 ## Boundaries
 
 | concern | owner |
@@ -114,14 +127,14 @@ diff retriggers CI, and the merge gate only fires on the live head.
 
 - Run logs: `tamias logs pr-review` / campaign history JSONL under
   `~/.local/share/peregrin/serve-history/pr-review.jsonl`.
-- Worktrees: `<worktree_base>/<sha12>` — removed automatically after a
-  successful push and on give-up; kept on failures for inspection
+- Worktrees: `<worktree_base>/<sha>` (full head sha) — removed
+  automatically after a successful push and on give-up; kept on failures for inspection
   (`lasius --root <ws> vcs worktree remove <checkout> --dir <path>`
   to gc manually).
 - PR map: `<worktree_base>/prs/<sha>` holds `number`, head `ref`,
   `base_ref` for each signalled sha.
 - Attempt ledgers: `<worktree_base>/attempts/pr-<n>-reviews` — delete
   the file to reset that PR's review budget.
-- Agent locks: `<worktree_base>/<sha12>.agent-lock` — stale locks are
+- Agent locks: `<worktree_base>/<sha>.agent-lock` — stale locks are
   removed by cleanup nodes; delete manually if a run died mid-flight
   (it also blocks merges for that sha until removed).

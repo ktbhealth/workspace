@@ -31,9 +31,19 @@
 #
 # Data flow: sha/number ride the emitted event TYPE (`*.{sha}` →
 # `${event.match.1}`); the pull_request payload's number/ref/base_ref
-# are persisted under <worktree_base>/prs/<sha> at worktree time so
-# downstream nodes never re-derive them (the Rust engine has no
-# stdout→state channel).
+# are persisted under `<worktree_base>/prs/<sha>` at guard time so
+# downstream nodes never re-derive them (the engine has no
+# stdout→state channel, and `driver: ops` results carry the driver's
+# stdout as an unparsed string — anything needing jq or per-sha file
+# state stays on `driver: shell`).
+#
+# `driver: ops` nodes spawn `tamias serve` per fire and send ONE
+# `driver.query` (`cli.<verb>` on the lasius ops manifest) — used
+# wherever a node's work is a single lasius call (vcs fetch /
+# worktree remove+add / commit). Composite nodes (guard + PR-map
+# write, attempt ledger, agent session curl, push branch resolution,
+# the merge gate's checks rollup + conflict classification, cleanup)
+# stay `driver: shell`.
 name: pr-review
 
 annotations:
@@ -137,19 +147,26 @@ nodes:
     # filter keeps the event feed honest).
     status_states: [success, failure, error]
 
-# --- review: pull_request → detached worktree at the head sha ----------
-# The payload carries number/sha/ref(head branch)/base_ref — all
-# persisted under <worktree_base>/prs/<sha> for downstream nodes.
-# Fork heads are skipped: the local clone cannot fetch fork objects
-# through lasius vcs, so there is nothing honest to check out.
-- id: pr-review.worktree
+# --- review: pull_request → guard + detached worktree ----------
+# The payload carries number/sha/ref(head branch)/base_ref — the PR
+# map is persisted under <worktree_base>/prs/<sha> for downstream
+# nodes. Fork heads are skipped: the local clone cannot fetch fork
+# objects through lasius vcs, so there is nothing honest to check out.
+#
+# Split into a shell guard (repo/fork policy + PR-map write — no
+# lasius call, but it owns the file ledger downstream nodes read) and
+# one `driver: ops` node per lasius call: fetch, stale-dir prune,
+# worktree add (see below). Worktrees and locks are keyed by the FULL
+# sha (`${event.match.1}`) — ops params are templates and cannot
+# substring the sha to 12 chars like the old shell `${SHA:0:12}` did.
+- id: pr-review.worktree.guard
   driver: shell
   on:
   - pull_request
   emits:
-  - pr-review.worktree.ready.*
-  - pr-review.worktree.failed.*
+  - pr-review.worktree.guarded.*
   - pr-review.worktree.skipped.*
+  - pr-review.worktree.failed.*
   max_fires: unlimited
   params:
     cmd: |
@@ -160,18 +177,85 @@ nodes:
         exit 3
       fi
       SHA='${event.payload.sha}'
-      WT="${config.worktree_base}/${SHA:0:12}"
       mkdir -p "${config.worktree_base}/prs"
       printf '%s\n%s\n%s\n' "${event.payload.number}" "${event.payload.ref}" "${event.payload.base_ref}" \
         > "${config.worktree_base}/prs/${SHA}"
-      lasius --root "${config.lasius_root}" vcs fetch "${config.checkout}" --json >/dev/null
-      lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
-      lasius --root "${config.lasius_root}" vcs worktree add "${config.checkout}" --dir "$WT" --rev "$SHA" --json >/dev/null
-      echo "worktree $WT for PR #${event.payload.number} (${event.payload.ref} → ${event.payload.base_ref})"
+      echo "guard passed for PR #${event.payload.number} (${event.payload.ref} → ${event.payload.base_ref}) @ ${SHA:0:12}"
     emit:
-      '0': "pr-review.worktree.ready.${event.payload.sha}"
+      '0': "pr-review.worktree.guarded.${event.payload.sha}"
       '3': "pr-review.worktree.skipped.${event.payload.sha}"
       default: "pr-review.worktree.failed.${event.payload.sha}"
+    timeout: 60
+
+# --- review: fetch the head sha into the local clone -------------------
+- id: pr-review.worktree.fetch
+  driver: ops
+  on:
+  - pr-review.worktree.guarded.*
+  emits:
+  - pr-review.worktree.fetched.*
+  - pr-review.worktree.failed.*
+  max_fires: unlimited
+  params:
+    driver: lasius
+    query: cli.vcs.fetch
+    params:
+      root: "${config.lasius_root}"
+      repo: "${config.checkout}"
+      json: true
+    # `driver: ops` emits emits[0]/emits[1] verbatim — the sha-suffixed
+    # kinds come from the template-resolved emit map instead (same
+    # mechanism as the shell driver's rc map).
+    emit:
+      success: "pr-review.worktree.fetched.${event.match.1}"
+      failure: "pr-review.worktree.failed.${event.match.1}"
+    timeout: 120
+
+# --- review: drop any stale worktree at this sha (best effort) ---------
+# Mirrors the old `worktree remove ... || true`: a missing dir is the
+# common case, so BOTH outcomes continue to the add — a genuinely
+# stuck dir fails the add instead, exactly like before.
+- id: pr-review.worktree.prune
+  driver: ops
+  on:
+  - pr-review.worktree.fetched.*
+  emits:
+  - pr-review.worktree.pruned.*
+  max_fires: unlimited
+  params:
+    driver: lasius
+    query: cli.vcs.worktree.remove
+    params:
+      root: "${config.lasius_root}"
+      repo: "${config.checkout}"
+      dir: "${config.worktree_base}/${event.match.1}"
+      json: true
+    emit:
+      success: "pr-review.worktree.pruned.${event.match.1}"
+      failure: "pr-review.worktree.pruned.${event.match.1}"
+    timeout: 60
+
+# --- review: detached worktree at the head sha -------------------------
+- id: pr-review.worktree.add
+  driver: ops
+  on:
+  - pr-review.worktree.pruned.*
+  emits:
+  - pr-review.worktree.ready.*
+  - pr-review.worktree.failed.*
+  max_fires: unlimited
+  params:
+    driver: lasius
+    query: cli.vcs.worktree.add
+    params:
+      root: "${config.lasius_root}"
+      repo: "${config.checkout}"
+      dir: "${config.worktree_base}/${event.match.1}"
+      rev: "${event.match.1}"
+      json: true
+    emit:
+      success: "pr-review.worktree.ready.${event.match.1}"
+      failure: "pr-review.worktree.failed.${event.match.1}"
     timeout: 120
 
 # --- review: per-PR attempt ledger --------------------------------------
@@ -240,14 +324,14 @@ nodes:
     cmd: |
       set -euo pipefail
       SHA='${event.match.1}'
-      WT="${config.worktree_base}/${SHA:0:12}"
+      WT="${config.worktree_base}/${SHA}"
       MAP="${config.worktree_base}/prs/${SHA}"
       NUMBER=$(sed -n '1p' "$MAP")
       BRANCH=$(sed -n '2p' "$MAP")
       BASE=$(sed -n '3p' "$MAP")
       # Per-sha lock: a retried/duplicated pull_request for the same
       # sha must not start a parallel agent on the same worktree.
-      LOCK="${config.worktree_base}/${SHA:0:12}.agent-lock"
+      LOCK="${config.worktree_base}/${SHA}.agent-lock"
       if ! mkdir "$LOCK" 2>/dev/null; then
         echo "review already in flight for $SHA"
         exit 1
@@ -291,11 +375,41 @@ nodes:
       default: "pr-review.agent.failed.${event.match.1}"
     timeout: 2000
 
-# --- review: commit + push HEAD to the PR head branch -------------------
+# --- review: commit the agent's adjustments in the worktree ------------
+# Single lasius call → `driver: ops`. No --allow-empty (the flag stays
+# off): an agent that produced no diff fails the commit honestly
+# instead of retriggering CI in a loop. A commit failure emits
+# push.failed.* — same terminal contract the combined node had.
+- id: pr-review.commit
+  driver: ops
+  on:
+  - pr-review.agent.done.*
+  emits:
+  - pr-review.committed.*
+  - pr-review.push.failed.*
+  max_fires: unlimited
+  params:
+    driver: lasius
+    query: cli.vcs.commit
+    params:
+      root: "${config.lasius_root}"
+      repo: "${config.worktree_base}/${event.match.1}"
+      message: "review: apply agent adjustments (pr-review)"
+      json: true
+    emit:
+      success: "pr-review.committed.${event.match.1}"
+      failure: "pr-review.push.failed.${event.match.1}"
+    timeout: 120
+
+# --- review: push HEAD to the PR head branch ----------------------------
+# Stays shell: the head branch name lives only in the per-sha PR map
+# (<worktree_base>/prs/<sha> line 2) — ops params are templates and
+# cannot read per-sha files, so the file read + refspec assembly
+# need a shell. Single lasius call remains.
 - id: pr-review.push
   driver: shell
   on:
-  - pr-review.agent.done.*
+  - pr-review.committed.*
   emits:
   - pr-review.pushed.*
   - pr-review.push.failed.*
@@ -304,15 +418,12 @@ nodes:
     cmd: |
       set -euo pipefail
       SHA='${event.match.1}'
-      WT="${config.worktree_base}/${SHA:0:12}"
+      WT="${config.worktree_base}/${SHA}"
       BRANCH=$(sed -n '2p' "${config.worktree_base}/prs/${SHA}")
       if [ -z "$BRANCH" ]; then
         echo "no branch recorded for $SHA — cannot name push branch"
         exit 1
       fi
-      # No --allow-empty: an agent that produced no diff fails the
-      # commit honestly instead of retriggering CI in a loop.
-      lasius --root "${config.lasius_root}" vcs commit "$WT" -m "review: apply agent adjustments (pr-review)" --json
       lasius --root "${config.lasius_root}" vcs push "$WT" --branch "HEAD:refs/heads/$BRANCH" --json
     emit:
       '0': "pr-review.pushed.${event.match.1}"
@@ -331,9 +442,9 @@ nodes:
     cmd: |
       set -uo pipefail
       SHA='${event.match.1}'
-      WT="${config.worktree_base}/${SHA:0:12}"
+      WT="${config.worktree_base}/${SHA}"
       lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
-      rmdir "${config.worktree_base}/${SHA:0:12}.agent-lock" 2>/dev/null || true
+      rmdir "${config.worktree_base}/${SHA}.agent-lock" 2>/dev/null || true
       echo "cleaned $WT"
     emit:
       '0': "pr-review.cleaned.${event.match.1}"
@@ -351,7 +462,7 @@ nodes:
     cmd: |
       set -uo pipefail
       SHA='${event.match.1}'
-      rmdir "${config.worktree_base}/${SHA:0:12}.agent-lock" 2>/dev/null || true
+      rmdir "${config.worktree_base}/${SHA}.agent-lock" 2>/dev/null || true
       echo "gaveup cleanup for ${SHA:0:12} (worktree kept for inspection)"
     emit:
       '0': "pr-review.cleaned.${event.match.1}"
@@ -409,7 +520,7 @@ nodes:
       SHA='${event.match.1}'
       # A review agent holding the per-sha lock means adjustments are
       # in flight — wait for the next ci.signal on the new head.
-      if [ -d "${config.worktree_base}/${SHA:0:12}.agent-lock" ]; then
+      if [ -d "${config.worktree_base}/${SHA}.agent-lock" ]; then
         echo "review agent in flight for $SHA — waiting"
         exit 4
       fi
