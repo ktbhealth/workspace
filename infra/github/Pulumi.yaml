@@ -1,0 +1,4 @@
+name: ktb-github
+runtime: nodejs
+description: ktbhealth org GitHub policies — repo merge settings, branch rulesets, org webhook
+main: .

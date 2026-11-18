@@ -1,0 +1,22 @@
+{
+	"name": "ktb-github-pulumi",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Pulumi program for ktbhealth org GitHub policies (repo merge settings, branch rulesets, org webhook). Not a workspace member — install deps here before `pulumi up`.",
+	"type": "module",
+	"main": "src/index.ts",
+	"scripts": {
+		"preview": "pulumi preview",
+		"up": "pulumi up",
+		"reconcile": "bun src/reconcile.ts",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@pulumi/github": "^6.15.1",
+		"@pulumi/pulumi": "^3.274.1"
+	},
+	"devDependencies": {
+		"@types/node": "^22.10.2",
+		"typescript": "^6.0.2"
+	}
+}

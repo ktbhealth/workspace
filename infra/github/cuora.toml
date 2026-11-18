@@ -1,0 +1,34 @@
+# ktb — cuora secret surface.
+# Refs are committed; values live in the vault, never in the repo.
+# Store with: printf '%s' "$VAL" | cuora put cuora://ktb/<name>
+
+# Remote vault: self-hosted CF Worker + D1, exclusive to the ktbhealth
+# account. Deployed from crates/cuora-vault-cf/worker (9aia/cuora).
+[vaults.ktb]
+kind = "cf"
+url = "https://cuora.ktbhealth.workers.dev"
+token_env = "CUORA_CF_TOKEN" # bearer fallback; scoped HMAC below
+cache = ["dev", "preview"] # prod reads live — no stale-prod footgun
+
+# Scoped token refs in the local vault — the ref path is the
+# token_id the worker's CUORA_VAULT_TOKENS map keys on.
+[vaults.ktb.tokens]
+dev = "cuora://ktb/cf-token-dev"
+preview = "cuora://ktb/cf-token-dev"
+prod = "cuora://ktb/cf-token-prod"
+
+[envs]
+dev = { vault = "ktb" }
+preview = { vault = "ktb" }
+prod = { vault = "ktb" }
+
+[secrets]
+# Pulumi passphrase for the DIY R2 state backend stack secrets.
+PULUMI_CONFIG_PASSPHRASE = "cuora://ktb/pulumi-passphrase"
+# Shared secret the org webhook signs payloads with; the ci worker
+# verifies X-Hub-Signature-256 against the same value.
+GITHUB_WEBHOOK_SECRET = "cuora://ktb/github-webhook-secret"
+# R2 state-backend credentials (minted separately — uncomment once
+# `cuora put` has stored them):
+# AWS_ACCESS_KEY_ID = "cuora://ktb/r2-access-key-id"
+# AWS_SECRET_ACCESS_KEY = "cuora://ktb/r2-secret-access-key"
