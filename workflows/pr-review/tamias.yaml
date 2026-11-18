@@ -8,7 +8,7 @@
 # session (sessions.create/set_mode/prompt_wait ops queries),
 # peregrin owns only event routing, tamias distributes.
 name: pr-review
-version: "0.1.3"
+version: "0.1.4"
 type: peregrin-bundle
 description: >-
   PR opened/updated → sepia agent reviews the diff and applies

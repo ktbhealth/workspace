@@ -17,7 +17,8 @@
 #     HEAD:pr-branch ──► cleanup worktree
 #       (push → synchronize → next pull_request; CI re-runs)
 #
-#   check_run|check_suite|status (completed) ──► ci.signal.<sha> ──►
+#   check_run|check_suite|status (completed) ──► ci.route (repo gate +
+#   open-PR head_sha pre-filter → ci.ignored) ──► ci.signal.<sha> ──►
 #   merge: resolve open PR by exact head_sha, require EVERY check on
 #   `lasius forge pr checks` green (SUCCESS/NEUTRAL/SKIPPED — pending
 #   or failed blocks), refuse while a review agent lock is held for
@@ -28,6 +29,12 @@
 # ledger (config.max_review_attempts); an agent that finds nothing to
 # change fails `vcs commit` honestly (no --allow-empty) and the chain
 # stops — the already-running CI still reaches the merge gate.
+#
+# Merge-race guards: the push node re-verifies an open PR still points
+# at the head sha before pushing (merged/closed/moved head →
+# push.skipped, no orphaned commit); ci.route drops check deliveries
+# for shas that aren't any open PR's head (ci.ignored) so main-branch
+# CI never reaches the merge node as merge.skipped noise.
 #
 # Data flow: sha/number ride the emitted event TYPE (`*.{sha}` →
 # `${event.match.1}`); the pull_request payload's number/ref/base_ref
@@ -530,15 +537,23 @@ nodes:
   # (<worktree_base>/prs/<sha> line 2) — ops params are templates and
   # cannot read per-sha files, so the file read + refspec assembly
   # need a shell. Single lasius call remains.
+  #
+  # Merge-race guard: the PR may have merged (or the head moved) while
+  # the agent ran — pushing then would orphan a commit on a dead branch.
+  # Verify an open PR still points at this head sha BEFORE pushing; no
+  # match → push.skipped (terminal, reported).
   - id: pr-review.push
     driver: shell
     on:
       - pr-review.committed.*
     emits:
       - pr-review.pushed.*
+      - pr-review.push.skipped.*
       - pr-review.push.failed.*
     max_fires: unlimited
     params:
+      env:
+        GH_TOKEN: "${secret.GITHUB_TOKEN}"
       cmd: |
         set -euo pipefail
         SHA='${event.match.1}'
@@ -548,9 +563,15 @@ nodes:
           echo "no branch recorded for $SHA — cannot name push branch"
           exit 1
         fi
+        JSON=$(lasius --root "${config.lasius_root}" forge pr list "${config.checkout}" --state open --json)
+        if ! printf '%s' "$JSON" | jq -e --arg sha "$SHA" '[.[] | select(.head_sha == $sha)] | length > 0' >/dev/null; then
+          echo "skip: PR no longer open for head_sha=$SHA"
+          exit 3
+        fi
         lasius --root "${config.lasius_root}" vcs push "$WT" --branch "HEAD:refs/heads/$BRANCH" --json
       emit:
         "0": "pr-review.pushed.${event.match.1}"
+        "3": "pr-review.push.skipped.${event.match.1}"
         default: "pr-review.push.failed.${event.match.1}"
       timeout: 120
 
@@ -593,10 +614,10 @@ nodes:
       timeout: 30
 
   # --- ci signal: check_run|check_suite|status → ci.signal.<sha> ---------
-  # Thin repo gate only — the merge node re-derives everything (open PR
-  # by exact head_sha, live `pr checks` rollup), so duplicate deliveries
-  # for one sha are harmless: the first merge closes the PR and later
-  # signals find no open PR → skipped.
+  # Repo gate + open-PR pre-filter — the merge node still re-derives
+  # everything (open PR by exact head_sha, live `pr checks` rollup), so
+  # duplicate deliveries for one sha are harmless: the first merge
+  # closes the PR and later signals find no open PR → skipped.
   - id: pr-review.ci.route
     driver: shell
     on:
@@ -608,12 +629,29 @@ nodes:
       - pr-review.ci.ignored
     max_fires: unlimited
     params:
+      env:
+        GH_TOKEN: "${secret.GITHUB_TOKEN}"
       cmd: |
         set -u
         [ "${event.payload.repo}" = "${config.repo}" ] || { echo "ignore: repo='${event.payload.repo}'"; exit 2; }
+        SHA='${event.payload.sha}'
+        # Cheap pre-filter: ci deliveries for shas that aren't any open
+        # PR's head (main pushes, merged PRs) would only produce
+        # merge.skipped noise — drop them here, one forge call per event.
+        # Fails OPEN: a forge error logs and lets the signal through;
+        # the merge node re-derives and decides.
+        JSON=$(lasius --root "${config.lasius_root}" forge pr list "${config.checkout}" --state open --json 2>/dev/null) || {
+          echo "ci.route: forge pr list failed for sha=$SHA — failing open" >&2
+          exit 0
+        }
+        if ! printf '%s' "$JSON" | jq -e --arg sha "$SHA" '[.[] | select(.head_sha == $sha)] | length > 0' >/dev/null; then
+          echo "ci.route: no open PR with head_sha=$SHA — ignored" >&2
+          exit 3
+        fi
         exit 0
       emit:
         "0": "pr-review.ci.signal.${event.payload.sha}"
+        "3": "pr-review.ci.ignored"
         default: pr-review.ci.ignored
       timeout: 30
 
@@ -710,6 +748,7 @@ nodes:
       - pr-review.agent.failed.*
       - pr-review.agent.busy.*
       - pr-review.pushed.*
+      - pr-review.push.skipped.*
       - pr-review.push.failed.*
       - pr-review.cleaned.*
       - pr-review.ci.ignored
