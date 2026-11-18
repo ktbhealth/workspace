@@ -17,4 +17,4 @@ dist/
 docs/
 
 # Lint plugin packages ship built output — oxlint jsPlugins consume plain JS.
-!packages/eslint-plugin-*/dist/
+!packages/eslint-*/dist/
