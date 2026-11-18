@@ -1,27 +1,4 @@
-/**
- * eslint-config-arch — lint presets for the ktbhealth architecture
- * rules (`eslint-plugin-arch`, plugin id `arch`).
- *
- * Exports preset factories that return oxlint/vite-plus `lint` config
- * fragments — consumers spread the result into their own config:
- *
- * ```ts
- * import { defineConfig } from "vite-plus";
- * import { arch } from "eslint-config-arch";
- *
- * export default defineConfig({
- *   lint: {
- *     ...arch.product(), // or arch.ui()
- *     options: { typeAware: true },
- *   },
- * });
- * ```
- *
- * The glob constants live here (not in the rule packages) because they
- * describe *where* each rule applies — ported from the product repo's
- * tools/arch-policy.mjs, which remains the wiring reference for
- * product-specific extras (composition-root exceptions, host overrides).
- */
+import { ExternalPluginEntry, OxlintOverride } from "vite-plus/lint";
 /** Port/domain packages — the same set banned from importing adapters. */
 export declare const PORT_PACKAGE_NAMES: readonly ["kernel", "auth", "authz", "bot", "captcha", "email", "transcription", "anamnesis", "export-pdf", "interop", "db", "driver-framework", "tenant", "rbac", "server-fns", "eval-core", "platform"];
 /** Files held to the strict boundary: ports, domain packages, plugins,
@@ -58,18 +35,13 @@ export declare const IMPL_IMPORT_PATTERNS: string[];
  * console ships known LLM baseUrls as pickable presets.
  */
 export declare const PROVIDER_LOCKIN_EXEMPTIONS: readonly ["plugins/theme/src/assets.ts", "plugins/theme/src/present.ts", "plugins/ai-endpoints/src/views/EndpointsPage.tsx"];
-export interface ArchJsPluginEntry {
-  name: string;
-  specifier: string;
-}
-export interface ArchOverride {
-  files: string[];
-  rules: Record<string, unknown>;
-}
-/** Fragment consumers spread into their oxlint `lint` config. */
+/** Fragment consumers spread into their oxlint `lint` config. The
+ * override/plugin shapes are oxlint's own types (re-exported through
+ * `vite-plus/lint`) so the fragment drops into `defineConfig` without
+ * casts. */
 export interface ArchLintFragment {
-  jsPlugins: ArchJsPluginEntry[];
-  overrides: ArchOverride[];
+  jsPlugins: ExternalPluginEntry[];
+  overrides: OxlintOverride[];
 }
 interface SpecifierOption {
   /** Module specifier oxlint resolves for `eslint-plugin-arch` —
@@ -79,7 +51,7 @@ interface SpecifierOption {
 }
 /**
  * Product preset — reproduces the ktbhealth product repo's effective
- * arch-policy wiring (tools/arch-policy.mjs): all nine `arch/<rule>`
+ * the former arch-policy wiring: all nine `arch/<rule>`
  * rules as "error" on the right globs, test exemptions "off", and the
  * provider-lockin file exemptions. Also carries the port/domain
  * platform/impl import restrictions that share the same override

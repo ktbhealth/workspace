@@ -1,28 +1,4 @@
 // src/index.ts
-/**
-* eslint-config-arch — lint presets for the ktbhealth architecture
-* rules (`eslint-plugin-arch`, plugin id `arch`).
-*
-* Exports preset factories that return oxlint/vite-plus `lint` config
-* fragments — consumers spread the result into their own config:
-*
-* ```ts
-* import { defineConfig } from "vite-plus";
-* import { arch } from "eslint-config-arch";
-*
-* export default defineConfig({
-*   lint: {
-*     ...arch.product(), // or arch.ui()
-*     options: { typeAware: true },
-*   },
-* });
-* ```
-*
-* The glob constants live here (not in the rule packages) because they
-* describe *where* each rule applies — ported from the product repo's
-* tools/arch-policy.mjs, which remains the wiring reference for
-* product-specific extras (composition-root exceptions, host overrides).
-*/
 /** Port/domain packages — the same set banned from importing adapters. */
 const PORT_PACKAGE_NAMES = [
 	"kernel",
@@ -161,7 +137,7 @@ const jsPluginsFor = (specifier = PLUGIN_SPECIFIER) => [{
 }];
 /**
 * Product preset — reproduces the ktbhealth product repo's effective
-* arch-policy wiring (tools/arch-policy.mjs): all nine `arch/<rule>`
+* the former arch-policy wiring: all nine `arch/<rule>`
 * rules as "error" on the right globs, test exemptions "off", and the
 * provider-lockin file exemptions. Also carries the port/domain
 * platform/impl import restrictions that share the same override

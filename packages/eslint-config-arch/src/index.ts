@@ -19,9 +19,11 @@
  *
  * The glob constants live here (not in the rule packages) because they
  * describe *where* each rule applies — ported from the product repo's
- * tools/arch-policy.mjs, which remains the wiring reference for
- * product-specific extras (composition-root exceptions, host overrides).
+ * former tools/arch-policy.mjs. Product-specific extras that stay
+ * consumer-side: composition-root exceptions and host overrides.
  */
+
+import type { ExternalPluginEntry, OxlintOverride } from "vite-plus/lint";
 
 /* ------------------------------------------------------------------ */
 /* Glob constants — ported from product/tools/arch-policy.mjs          */
@@ -178,25 +180,18 @@ export const PROVIDER_LOCKIN_EXEMPTIONS = [
 /* Preset fragment types                                              */
 /* ------------------------------------------------------------------ */
 
-export interface ArchJsPluginEntry {
-  name: string;
-  specifier: string;
-}
-
-export interface ArchOverride {
-  files: string[];
-  rules: Record<string, unknown>;
-}
-
-/** Fragment consumers spread into their oxlint `lint` config. */
+/** Fragment consumers spread into their oxlint `lint` config. The
+ * override/plugin shapes are oxlint's own types (re-exported through
+ * `vite-plus/lint`) so the fragment drops into `defineConfig` without
+ * casts. */
 export interface ArchLintFragment {
-  jsPlugins: ArchJsPluginEntry[];
-  overrides: ArchOverride[];
+  jsPlugins: ExternalPluginEntry[];
+  overrides: OxlintOverride[];
 }
 
 const PLUGIN_SPECIFIER = "eslint-plugin-arch";
 
-const jsPluginsFor = (specifier = PLUGIN_SPECIFIER): ArchJsPluginEntry[] => [
+const jsPluginsFor = (specifier = PLUGIN_SPECIFIER): ExternalPluginEntry[] => [
 	{ name: "arch", specifier },
 ];
 
@@ -213,7 +208,7 @@ interface SpecifierOption {
 
 /**
  * Product preset — reproduces the ktbhealth product repo's effective
- * arch-policy wiring (tools/arch-policy.mjs): all nine `arch/<rule>`
+ * the former arch-policy wiring: all nine `arch/<rule>`
  * rules as "error" on the right globs, test exemptions "off", and the
  * provider-lockin file exemptions. Also carries the port/domain
  * platform/impl import restrictions that share the same override

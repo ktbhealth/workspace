@@ -30,7 +30,7 @@ const ARCH_RULE_IDS = [
 /** Every `arch/<rule>` id referenced by any override's rules. */
 const archRuleUsages = (fragment: ReturnType<typeof product>) =>
   fragment.overrides.flatMap((o) =>
-    Object.entries(o.rules)
+    Object.entries(o.rules ?? {})
       .filter(([id]) => id.startsWith("arch/"))
       .map(([id, setting]) => ({ id, setting, files: o.files })),
   );
@@ -49,7 +49,7 @@ describe("arch.product()", () => {
 
   it("enables every rule as error on its source globs", () => {
     for (const id of ARCH_RULE_IDS) {
-      const errorBlock = fragment.overrides.find((o) => o.rules[id] === "error");
+      const errorBlock = fragment.overrides.find((o) => o.rules?.[id] === "error");
       expect(errorBlock, `${id} has no "error" override`).toBeDefined();
     }
   });
@@ -70,7 +70,7 @@ describe("arch.product()", () => {
   it("carries the provider-lockin file exemptions", () => {
     const exemption = fragment.overrides.find(
       (o) =>
-        o.rules["arch/provider-lockin"] === "off" &&
+        o.rules?.["arch/provider-lockin"] === "off" &&
         o.files.length === PROVIDER_LOCKIN_EXEMPTIONS.length &&
         PROVIDER_LOCKIN_EXEMPTIONS.every((f) => o.files.includes(f)),
     );
@@ -82,7 +82,7 @@ describe("arch.product()", () => {
       (o) => o.files.length === PORT_GLOBS.length && PORT_GLOBS.every((g) => o.files.includes(g)),
     );
     expect(portBlock).toBeDefined();
-    const restricted = portBlock!.rules["no-restricted-imports"] as [
+    const restricted = portBlock!.rules!["no-restricted-imports"] as [
       string,
       { patterns: string[] },
     ];
@@ -90,7 +90,7 @@ describe("arch.product()", () => {
     expect(restricted[1].patterns).toEqual(
       expect.arrayContaining([...IMPL_IMPORT_PATTERNS, ...PLATFORM_IMPORT_PATTERNS]),
     );
-    const globals = portBlock!.rules["no-restricted-globals"] as unknown[];
+    const globals = portBlock!.rules!["no-restricted-globals"] as unknown[];
     expect(globals[0]).toBe("error");
     expect((globals.slice(1) as { name: string }[]).map((g) => g.name)).toEqual([
       ...PLATFORM_GLOBALS,
