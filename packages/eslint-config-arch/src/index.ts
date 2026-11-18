@@ -196,7 +196,16 @@ export interface ArchLintFragment {
 
 const PLUGIN_SPECIFIER = "eslint-plugin-arch";
 
-const jsPlugins: ArchJsPluginEntry[] = [{ name: "arch", specifier: PLUGIN_SPECIFIER }];
+const jsPluginsFor = (specifier = PLUGIN_SPECIFIER): ArchJsPluginEntry[] => [
+	{ name: "arch", specifier },
+];
+
+interface SpecifierOption {
+	/** Module specifier oxlint resolves for `eslint-plugin-arch` —
+	 * override when the package is installed under a different
+	 * name/subpath (e.g. `@ktbhealth/workspace/eslint-plugin-arch`). */
+	pluginSpecifier?: string;
+}
 
 /* ------------------------------------------------------------------ */
 /* Presets                                                            */
@@ -215,9 +224,9 @@ const jsPlugins: ArchJsPluginEntry[] = [{ name: "arch", specifier: PLUGIN_SPECIF
  * ban with its composition-root exception list, and the vitest
  * plugin wiring.
  */
-export function product(): ArchLintFragment {
+export function product(options: SpecifierOption = {}): ArchLintFragment {
   return {
-    jsPlugins,
+    jsPlugins: jsPluginsFor(options.pluginSpecifier),
     overrides: [
       {
         // Port/domain boundary: ports, domain packages and plugins may
@@ -325,11 +334,11 @@ const DEFAULT_UI_TESTS = ["**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}"];
  * (e.g. the design-system repo): palette utilities, arbitrary color
  * values and literal white/black fills bypass theme tokens.
  */
-export function ui(options: UiPresetOptions = {}): ArchLintFragment {
+export function ui(options: UiPresetOptions & SpecifierOption = {}): ArchLintFragment {
   const sources = options.sources ?? DEFAULT_UI_SOURCES;
   const tests = options.tests ?? DEFAULT_UI_TESTS;
   return {
-    jsPlugins,
+    jsPlugins: jsPluginsFor(options.pluginSpecifier),
     overrides: [
       {
         files: sources,

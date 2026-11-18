@@ -1,6 +1,6 @@
 {
   "name": "eslint-config-arch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Lint presets for the ktbhealth `arch` oxlint plugin — arch.product() reproduces the product repo's boundary wiring, arch.ui() enables the theme-token color rule for UI repos.",
   "files": [
     "dist"
