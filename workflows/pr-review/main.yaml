@@ -657,7 +657,7 @@ nodes:
         exit 3
       fi
       CHECKS=$(lasius --root "${config.lasius_root}" forge pr checks "${config.checkout}" "$NUMBER" --json) || exit 1
-      READY=$(printf '%s' "$CHECKS" | jq '
+      READY=$(printf '%s' "$CHECKS" | jq -r '
         if length == 0 then "empty"
         elif all(.[]; (((.conclusion // "") + " " + .state) | ascii_upcase) as $v
               | ($v | test("SUCCESS|NEUTRAL|SKIPPED"))) then "green"
