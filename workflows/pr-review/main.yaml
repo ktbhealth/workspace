@@ -1,0 +1,491 @@
+# pr-review — pull_request → sepia agent review + adjust → push →
+# verified-green checks → campaign-driven squash merge.
+#
+# ktbhealth variant of 9aia's pr-heal bundle: same boundaries (lasius
+# owns every git/forge call, sepia owns the agent session via the
+# node's POST /api/sessions/run, peregrin owns only event routing),
+# different trigger and a forge-native CI signal — ktbhealth repos CI
+# on GitHub Actions, so completion arrives as check_run/check_suite/
+# status webhook deliveries and the merge gate is `lasius forge pr
+# checks`, NOT bupha's ci.job.completed channel.
+#
+# Flow:
+#   pull_request (opened|synchronize|reopened) ──► worktree@head-sha
+#     (detached; PR number/ref/base persisted per sha) ──► per-PR
+#     review-attempt ledger ──► sepia run (review diff vs base, apply
+#     needed adjustments, leave uncommitted) ──► commit + push
+#     HEAD:pr-branch ──► cleanup worktree
+#       (push → synchronize → next pull_request; CI re-runs)
+#
+#   check_run|check_suite|status (completed) ──► ci.signal.<sha> ──►
+#   merge: resolve open PR by exact head_sha, require EVERY check on
+#   `lasius forge pr checks` green (SUCCESS/NEUTRAL/SKIPPED — pending
+#   or failed blocks), refuse while a review agent lock is held for
+#   the sha, then squash+delete-branch via lasius forge.
+#
+# Loop safety: the agent's own push re-triggers pull_request → a
+# second review of its adjustments. Bounded by the per-PR review
+# ledger (config.max_review_attempts); an agent that finds nothing to
+# change fails `vcs commit` honestly (no --allow-empty) and the chain
+# stops — the already-running CI still reaches the merge gate.
+#
+# Data flow: sha/number ride the emitted event TYPE (`*.{sha}` →
+# `${event.match.1}`); the pull_request payload's number/ref/base_ref
+# are persisted under <worktree_base>/prs/<sha> at worktree time so
+# downstream nodes never re-derive them (the Rust engine has no
+# stdout→state channel).
+name: pr-review
+
+annotations:
+  title: PR review — sepia agent adjust to verified-green merge
+  description: >-
+    React to pull_request deliveries: a sepia agent reviews the diff
+    and applies needed adjustments in a lasius worktree; GitHub
+    check/status deliveries drive a verified-sha squash merge once
+    every check on the PR head is green.
+  author: ktbhealth
+  tags: [pr-review, ci, agent, workflow]
+  since: "0.1.0"
+
+# Operator-facing knobs (see params.schema.json + README.md). The two
+# deployment-specific values — `repo` and `webhook_secret_env` — MUST
+# be set per watched repository before install.
+config:
+  # Watched repo as owner/name — drives the webhook repo filter and
+  # the ci-signal repo check. REQUIRED per deployment.
+  repo: ""
+  # Env var holding this repo's webhook HMAC secret — the
+  # BUPHA_WH_<OWNER>_<REPO> convention (uppercased, - → _). REQUIRED.
+  webhook_secret_env: ""
+  # Base URL of `peregrin serve` — sessions + entity plane. The agent
+  # step POSTs /api/sessions/run here; bearer = PEREGRIN_TOKEN.
+  node_url: "http://127.0.0.1:18787"
+  # Local clone lasius operates on (any checkout path — not required
+  # to live inside a lasius workspace). REQUIRED per deployment.
+  checkout: ""
+  # Detached review worktrees + attempt ledgers + per-sha PR map land
+  # here.
+  worktree_base: "$HOME/.local/share/pr-review/worktrees"
+  # sepia agent id for review sessions (agent-config name, e.g. devin).
+  agent: "devin"
+  # Agent session mode applied via ACP session/set_mode after create —
+  # REQUIRED for unattended runs: devin's default accept-edits prompts
+  # on exec and nothing answers, deadlocking the turn. "bypass"
+  # auto-approves everything (fine inside a disposable worktree);
+  # "smart" is the safer middle ground.
+  agent_mode: "bypass"
+  # Per-PR cap on agent review attempts — counted in
+  # <worktree_base>/attempts/pr-<n>-reviews, survives restarts.
+  max_review_attempts: 2
+  # Verification command the agent must leave passing — the prompt
+  # embeds it verbatim; it is NOT executed by the campaign (the agent
+  # runs it inside the worktree).
+  verify_cmd: "bun run check"
+  # Merge method for the green-path squash merge.
+  merge_method: "squash"
+  # lasius workspace root (--root) — repo args are checkout paths, so
+  # any lasius.toml workspace works; the ktbhealth workspace is the
+  # natural choice.
+  lasius_root: "/home/luis/GitHub/ktbhealth"
+
+# Secret NAMES only — values live in ~/.config/peregrin/env (or cuora).
+# PEREGRIN_TOKEN always; the webhook HMAC env var named by
+# config.webhook_secret_env must ALSO be declared — the cuora/keyring
+# secret legs are `declared_only`, so an undeclared name resolves ONLY
+# via the plaintext env file.
+capabilities:
+  secrets:
+    - PEREGRIN_TOKEN
+    - BUPHA_WH_*
+
+# No `events:` block — every subscribed type (pull_request, check_run,
+# check_suite, status) is emitted by the github-webhook driver itself;
+# there is no external inject channel (no bupha on ktbhealth).
+
+# No supersede: each pull_request delivery carries a distinct head sha
+# and each check delivery a distinct verdict — keying on (repo, sha)
+# would cancel legitimate work.
+
+nodes:
+# --- ingress: verified deliveries for the watched repo -----------------
+- id: pr-review.ingress
+  driver: github-webhook
+  on:
+  - start
+  emits:
+  - pr-review.ingress.listening
+  - pull_request
+  - check_run
+  - check_suite
+  - status
+  params:
+    # Under `campaign serve` the daemon's --listen/--path govern the
+    # ONE shared socket — these are ignored there.
+    listen: 127.0.0.1:29174
+    path: /hook
+    repos:
+    - name: "${config.repo}"
+      secret_env: "${config.webhook_secret_env}"
+    # PR lifecycle we review: new heads and updates; closed/merged
+    # would spawn agents on dead refs.
+    pull_request_actions: [opened, synchronize, reopened]
+    # Only terminal check deliveries carry a verdict.
+    check_run_actions: [completed]
+    check_suite_actions: [completed]
+    # Terminal commit-status states only — `pending` would just wake
+    # the merge node early (it re-checks `pr checks` anyway, but the
+    # filter keeps the event feed honest).
+    status_states: [success, failure, error]
+
+# --- review: pull_request → detached worktree at the head sha ----------
+# The payload carries number/sha/ref(head branch)/base_ref — all
+# persisted under <worktree_base>/prs/<sha> for downstream nodes.
+# Fork heads are skipped: the local clone cannot fetch fork objects
+# through lasius vcs, so there is nothing honest to check out.
+- id: pr-review.worktree
+  driver: shell
+  on:
+  - pull_request
+  emits:
+  - pr-review.worktree.ready.*
+  - pr-review.worktree.failed.*
+  - pr-review.worktree.skipped.*
+  max_fires: unlimited
+  params:
+    cmd: |
+      set -euo pipefail
+      [ "${event.payload.repo}" = "${config.repo}" ] || { echo "ignore: repo='${event.payload.repo}'"; exit 2; }
+      if [ "${event.payload.fork}" = "true" ]; then
+        echo "skip: PR #${event.payload.number} head is a fork — local clone cannot fetch it"
+        exit 3
+      fi
+      SHA='${event.payload.sha}'
+      WT="${config.worktree_base}/${SHA:0:12}"
+      mkdir -p "${config.worktree_base}/prs"
+      printf '%s\n%s\n%s\n' "${event.payload.number}" "${event.payload.ref}" "${event.payload.base_ref}" \
+        > "${config.worktree_base}/prs/${SHA}"
+      lasius --root "${config.lasius_root}" vcs fetch "${config.checkout}" --json >/dev/null
+      lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
+      lasius --root "${config.lasius_root}" vcs worktree add "${config.checkout}" --dir "$WT" --rev "$SHA" --json >/dev/null
+      echo "worktree $WT for PR #${event.payload.number} (${event.payload.ref} → ${event.payload.base_ref})"
+    emit:
+      '0': "pr-review.worktree.ready.${event.payload.sha}"
+      '3': "pr-review.worktree.skipped.${event.payload.sha}"
+      default: "pr-review.worktree.failed.${event.payload.sha}"
+    timeout: 120
+
+# --- review: per-PR attempt ledger --------------------------------------
+# Counts review attempts per PR number in
+# <worktree_base>/attempts/pr-<n>-reviews — durable across campaign
+# restarts and scoped per PR. Over cap → gaveup.<sha>, reported
+# terminally; the PR is left for a human (CI still gates the merge).
+- id: pr-review.attempts
+  driver: shell
+  on:
+  - pr-review.worktree.ready.*
+  emits:
+  - pr-review.attempts.ok.*
+  - pr-review.attempts.gaveup.*
+  - pr-review.attempts.failed.*
+  max_fires: unlimited
+  params:
+    cmd: |
+      set -euo pipefail
+      SHA='${event.match.1}'
+      MAP="${config.worktree_base}/prs/${SHA}"
+      if [ ! -f "$MAP" ]; then
+        echo "no PR map for $SHA — worktree node did not persist it"
+        exit 1
+      fi
+      NUMBER=$(sed -n '1p' "$MAP")
+      DIR="${config.worktree_base}/attempts"
+      FILE="$DIR/pr-$NUMBER-reviews"
+      mkdir -p "$DIR"
+      COUNT=$(( $(cat "$FILE" 2>/dev/null || echo 0) + 1 ))
+      echo "$COUNT" > "$FILE"
+      if [ "$COUNT" -gt "${config.max_review_attempts}" ]; then
+        echo "pr #$NUMBER review attempt $COUNT exceeds cap ${config.max_review_attempts} — giving up"
+        exit 3
+      fi
+      echo "pr #$NUMBER review attempt $COUNT/${config.max_review_attempts}"
+    emit:
+      '0': "pr-review.attempts.ok.${event.match.1}"
+      '3': "pr-review.attempts.gaveup.${event.match.1}"
+      default: "pr-review.attempts.failed.${event.match.1}"
+    timeout: 60
+
+# --- review: sepia agent session — review + adjust, do not commit ------
+# POST /api/sessions/run on the node: create session + blocking
+# prompt_wait in one call. shell+curl (not driver:http) so the emitted
+# event can carry the sha — and so the bearer token rides curl's
+# --config stdin instead of `ps` argv. `mode` is REQUIRED: devin's
+# default prompts on exec and an unattended turn deadlocks.
+- id: pr-review.agent
+  driver: shell
+  on:
+  - pr-review.attempts.ok.*
+  emits:
+  - pr-review.agent.done.*
+  - pr-review.agent.failed.*
+  # Per-PR attempt cap lives in pr-review.attempts (durable ledger);
+  # max_fires stays as a campaign-lifetime circuit breaker only.
+  max_fires: 50
+  retry:
+    max_attempts: 3
+    delay: 5000
+    backoff: fixed
+  params:
+    env:
+      PRREVIEW_TOKEN: "${secret.PEREGRIN_TOKEN}"
+    cmd: |
+      set -euo pipefail
+      SHA='${event.match.1}'
+      WT="${config.worktree_base}/${SHA:0:12}"
+      MAP="${config.worktree_base}/prs/${SHA}"
+      NUMBER=$(sed -n '1p' "$MAP")
+      BRANCH=$(sed -n '2p' "$MAP")
+      BASE=$(sed -n '3p' "$MAP")
+      # Per-sha lock: a retried/duplicated pull_request for the same
+      # sha must not start a parallel agent on the same worktree.
+      LOCK="${config.worktree_base}/${SHA:0:12}.agent-lock"
+      if ! mkdir "$LOCK" 2>/dev/null; then
+        echo "review already in flight for $SHA"
+        exit 1
+      fi
+      trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+      # PR title/body for the prompt — best effort, never fatal.
+      PRJSON=$(lasius --root "${config.lasius_root}" forge pr view "${config.checkout}" "$NUMBER" --json 2>/dev/null || true)
+      TITLE=$(printf '%s' "$PRJSON" | jq -r '.title // empty' 2>/dev/null || true)
+      BODY=$(printf '%s' "$PRJSON" | jq -r '.body // empty' 2>/dev/null | head -c 2000 || true)
+      PROMPT=$(jq -n \
+        --arg cwd "$WT" \
+        --arg number "$NUMBER" \
+        --arg branch "$BRANCH" \
+        --arg base "$BASE" \
+        --arg sha "$SHA" \
+        --arg title "$TITLE" \
+        --arg body "$BODY" \
+        --arg verify "${config.verify_cmd}" \
+        --arg agent "${config.agent}" \
+        --arg mode "${config.agent_mode}" \
+        '{cwd:$cwd, agent:$agent, mode:$mode, timeoutMs:1800000, text:(
+          "You are reviewing pull request #\($number) (\($branch) → \($base), head \($sha)) in this worktree.\n\n" +
+          "Title: \($title)\n\nDescription:\n\($body)\n\n" +
+          "1. Review the diff of this branch against \($base) — correctness, edge cases, and the repository conventions in AGENTS.md.\n" +
+          "2. Apply the adjustments that are actually needed — do not churn the diff for style alone.\n" +
+          "3. Run `\($verify)` and leave it passing.\n" +
+          "4. If the only changes present are a previous review pass by this workflow (commit message starts with \"review:\"), make NO changes — an empty result is a valid outcome.\n\n" +
+          "Do NOT commit, push, or open a PR — leave the changes in the working tree; the campaign commits and pushes."
+        )}')
+      # Bearer via curl --config on stdin: keeps the token out of `ps`
+      # argv (a literal -H "Bearer $TOKEN" would expose it; curl's
+      # --variable {{name}} expansion does not apply to -H headers).
+      RESP=$(printf 'header = "authorization: Bearer %s"\n' "$PRREVIEW_TOKEN" |
+        curl -sf --max-time 1900 --config - \
+        -X POST "${config.node_url}/api/sessions/run" \
+        -H 'content-type: application/json' -d "$PROMPT")
+      echo "$RESP" | jq .
+      printf '%s' "$RESP" | jq -e '(.stopReason == "end_turn" or .stopReason == "cancelled") and (.timedOut != true)' >/dev/null
+    emit:
+      '0': "pr-review.agent.done.${event.match.1}"
+      default: "pr-review.agent.failed.${event.match.1}"
+    timeout: 2000
+
+# --- review: commit + push HEAD to the PR head branch -------------------
+- id: pr-review.push
+  driver: shell
+  on:
+  - pr-review.agent.done.*
+  emits:
+  - pr-review.pushed.*
+  - pr-review.push.failed.*
+  max_fires: unlimited
+  params:
+    cmd: |
+      set -euo pipefail
+      SHA='${event.match.1}'
+      WT="${config.worktree_base}/${SHA:0:12}"
+      BRANCH=$(sed -n '2p' "${config.worktree_base}/prs/${SHA}")
+      if [ -z "$BRANCH" ]; then
+        echo "no branch recorded for $SHA — cannot name push branch"
+        exit 1
+      fi
+      # No --allow-empty: an agent that produced no diff fails the
+      # commit honestly instead of retriggering CI in a loop.
+      lasius --root "${config.lasius_root}" vcs commit "$WT" -m "review: apply agent adjustments (pr-review)" --json
+      lasius --root "${config.lasius_root}" vcs push "$WT" --branch "HEAD:refs/heads/$BRANCH" --json
+    emit:
+      '0': "pr-review.pushed.${event.match.1}"
+      default: "pr-review.push.failed.${event.match.1}"
+    timeout: 120
+
+# --- cleanup: worktree + lock after a successful push -------------------
+- id: pr-review.cleanup.pushed
+  driver: shell
+  on:
+  - pr-review.pushed.*
+  emits:
+  - pr-review.cleaned.*
+  max_fires: unlimited
+  params:
+    cmd: |
+      set -uo pipefail
+      SHA='${event.match.1}'
+      WT="${config.worktree_base}/${SHA:0:12}"
+      lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
+      rmdir "${config.worktree_base}/${SHA:0:12}.agent-lock" 2>/dev/null || true
+      echo "cleaned $WT"
+    emit:
+      '0': "pr-review.cleaned.${event.match.1}"
+    timeout: 60
+
+# --- cleanup: gave up — worktree stays for human inspection -------------
+- id: pr-review.cleanup.gaveup
+  driver: shell
+  on:
+  - pr-review.attempts.gaveup.*
+  emits:
+  - pr-review.cleaned.*
+  max_fires: unlimited
+  params:
+    cmd: |
+      set -uo pipefail
+      SHA='${event.match.1}'
+      rmdir "${config.worktree_base}/${SHA:0:12}.agent-lock" 2>/dev/null || true
+      echo "gaveup cleanup for ${SHA:0:12} (worktree kept for inspection)"
+    emit:
+      '0': "pr-review.cleaned.${event.match.1}"
+    timeout: 30
+
+# --- ci signal: check_run|check_suite|status → ci.signal.<sha> ---------
+# Thin repo gate only — the merge node re-derives everything (open PR
+# by exact head_sha, live `pr checks` rollup), so duplicate deliveries
+# for one sha are harmless: the first merge closes the PR and later
+# signals find no open PR → skipped.
+- id: pr-review.ci.route
+  driver: shell
+  on:
+  - check_run
+  - check_suite
+  - status
+  emits:
+  - pr-review.ci.signal.*
+  - pr-review.ci.ignored
+  max_fires: unlimited
+  params:
+    cmd: |
+      set -u
+      [ "${event.payload.repo}" = "${config.repo}" ] || { echo "ignore: repo='${event.payload.repo}'"; exit 2; }
+      exit 0
+    emit:
+      '0': "pr-review.ci.signal.${event.payload.sha}"
+      default: pr-review.ci.ignored
+    timeout: 30
+
+# --- merge: verified green → squash-merge via lasius forge -------------
+# Safety stack, all re-derived at fire time:
+#   1. open PR whose head_sha IS the signalled sha (stale sha → skip)
+#   2. NO review agent lock held for the sha (a review/adjust pass in
+#      flight means the head is about to move — merging now would
+#      race the push)
+#   3. `lasius forge pr checks` reports a NON-EMPTY rollup and every
+#      check's verdict is SUCCESS/NEUTRAL/SKIPPED — pending or failed
+#      blocks (exit 4 → merge.waiting, retried by the next delivery)
+#   4. merge only ever fires for the exact verified sha
+- id: pr-review.merge
+  driver: shell
+  on:
+  - pr-review.ci.signal.*
+  emits:
+  - pr-review.merged.*
+  - pr-review.merge.skipped.*
+  - pr-review.merge.waiting.*
+  - pr-review.merge.failed.*
+  - pr-review.merge.conflict.*
+  max_fires: unlimited
+  params:
+    cmd: |
+      set -uo pipefail
+      SHA='${event.match.1}'
+      # A review agent holding the per-sha lock means adjustments are
+      # in flight — wait for the next ci.signal on the new head.
+      if [ -d "${config.worktree_base}/${SHA:0:12}.agent-lock" ]; then
+        echo "review agent in flight for $SHA — waiting"
+        exit 4
+      fi
+      JSON=$(lasius --root "${config.lasius_root}" forge pr list "${config.checkout}" --state open --json) || exit 1
+      NUMBER=$(printf '%s' "$JSON" | jq -r --arg sha "$SHA" '[.[] | select(.head_sha == $sha)] | .[0].number // empty')
+      if [ -z "$NUMBER" ]; then
+        echo "skip: no open PR with head_sha=$SHA"
+        exit 3
+      fi
+      CHECKS=$(lasius --root "${config.lasius_root}" forge pr checks "${config.checkout}" "$NUMBER" --json) || exit 1
+      READY=$(printf '%s' "$CHECKS" | jq '
+        if length == 0 then "empty"
+        elif all(.[]; (((.conclusion // "") + " " + .state) | ascii_upcase) as $v
+              | ($v | test("SUCCESS|NEUTRAL|SKIPPED"))) then "green"
+        else "blocked" end')
+      if [ "$READY" != "green" ]; then
+        echo "pr #$NUMBER checks not all green ($READY) — waiting"
+        exit 4
+      fi
+      echo "merging PR #$NUMBER (head $SHA, all checks green)"
+      if OUT=$(lasius --root "${config.lasius_root}" forge pr merge "${config.checkout}" "$NUMBER" --method "${config.merge_method}" --delete-branch --json 2>&1); then
+        printf '%s\n' "$OUT"
+        exit 0
+      fi
+      echo "merge failed: $OUT"
+      # Classify conflict vs other failure — same precedent as pr-heal.
+      VIEW=$(lasius --root "${config.lasius_root}" forge pr view "${config.checkout}" "$NUMBER" --json 2>/dev/null) || exit 1
+      MERGEABLE=$(printf '%s' "$VIEW" | jq -r '.mergeable // empty')
+      MSTATE=$(printf '%s' "$VIEW" | jq -r '.merge_state // empty')
+      CONFLICT=0
+      case "$MERGEABLE" in CONFLICTING) CONFLICT=1 ;; esac
+      if [ "$MSTATE" = "DIRTY" ]; then CONFLICT=1; fi
+      if [ "$CONFLICT" -eq 0 ]; then
+        case "$OUT" in
+          *conflict*|*CONFLICT*|*"not mergeable"*) CONFLICT=1 ;;
+        esac
+      fi
+      if [ "$CONFLICT" -eq 1 ]; then
+        echo "PR #$NUMBER unmergeable (mergeable=$MERGEABLE merge_state=$MSTATE)"
+        exit 5
+      fi
+      echo "merge failed without a conflict signal (mergeable=$MERGEABLE merge_state=$MSTATE)"
+      exit 1
+    emit:
+      '0': "pr-review.merged.${event.match.1}"
+      '3': "pr-review.merge.skipped.${event.match.1}"
+      '4': "pr-review.merge.waiting.${event.match.1}"
+      '5': "pr-review.merge.conflict.${event.match.1}"
+      default: "pr-review.merge.failed.${event.match.1}"
+    timeout: 120
+
+# --- terminal reporting --------------------------------------------------
+- id: pr-review.report
+  driver: shell
+  on:
+  - pr-review.worktree.skipped.*
+  - pr-review.worktree.failed.*
+  - pr-review.attempts.gaveup.*
+  - pr-review.attempts.failed.*
+  - pr-review.agent.done.*
+  - pr-review.agent.failed.*
+  - pr-review.pushed.*
+  - pr-review.push.failed.*
+  - pr-review.cleaned.*
+  - pr-review.ci.ignored
+  - pr-review.merged.*
+  - pr-review.merge.skipped.*
+  - pr-review.merge.waiting.*
+  - pr-review.merge.failed.*
+  - pr-review.merge.conflict.*
+  - node.exhausted
+  emits:
+  - pr-review.report.done
+  params:
+    cmd: |
+      echo "pr-review terminal: ${event.type} sha=${event.match.1:-${event.payload.sha:-?}}"
+    emit:
+      '0': pr-review.report.done
+    timeout: 30
