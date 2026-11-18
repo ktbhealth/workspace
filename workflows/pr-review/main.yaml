@@ -119,6 +119,9 @@ config:
 capabilities:
   secrets:
     - BUPHA_WH_*
+    # gh CLI auth for `lasius forge` calls in shell nodes — resolved
+    # cuora-first (cuora://peregrin/GITHUB_TOKEN), never argv/env-file.
+    - GITHUB_TOKEN
 
 # No `events:` block — every subscribed type (pull_request, check_run,
 # check_suite, status) is emitted by the github-webhook driver itself;
@@ -355,6 +358,10 @@ nodes:
     delay: 5000
     backoff: fixed
   params:
+    # `lasius forge` shells to gh — GH_TOKEN bypasses the keyring
+    # (which hangs headless under systemd).
+    env:
+      GH_TOKEN: "${secret.GITHUB_TOKEN}"
     cmd: |
       set -euo pipefail
       SHA='${event.match.1}'
@@ -684,6 +691,8 @@ nodes:
   - pr-review.merge.conflict.*
   max_fires: unlimited
   params:
+    env:
+      GH_TOKEN: "${secret.GITHUB_TOKEN}"
     cmd: |
       set -uo pipefail
       SHA='${event.match.1}'
