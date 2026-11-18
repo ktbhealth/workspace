@@ -10,6 +10,24 @@
         "vitest": "5.1.0",
       },
     },
+    "packages/eslint-config-arch": {
+      "name": "eslint-config-arch",
+      "version": "0.1.0",
+      "devDependencies": {
+        "typescript": "^6.0.2",
+        "vite-plus": "1.5.1",
+        "vitest": "5.1.0",
+      },
+    },
+    "packages/eslint-plugin-arch": {
+      "name": "eslint-plugin-arch",
+      "version": "0.1.0",
+      "devDependencies": {
+        "typescript": "^6.0.2",
+        "vite-plus": "1.5.1",
+        "vitest": "5.1.0",
+      },
+    },
     "packages/eslint-plugin-client-contract": {
       "name": "eslint-plugin-client-contract",
       "version": "0.1.0",
@@ -336,6 +354,10 @@
     "dom-accessibility-api": ["dom-accessibility-api@0.5.16", "", {}, "sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg=="],
 
     "es-module-lexer": ["es-module-lexer@2.3.2", "", {}, "sha512-poHGpORABojJJucnV9KbOavETW8lBVnphkW77ER5/BQ5Fz7oXSoCNek7IH3vR5nRjdsEz926ibFYX8KtLQmdyw=="],
+
+    "eslint-config-arch": ["eslint-config-arch@workspace:packages/eslint-config-arch"],
+
+    "eslint-plugin-arch": ["eslint-plugin-arch@workspace:packages/eslint-plugin-arch"],
 
     "eslint-plugin-client-contract": ["eslint-plugin-client-contract@workspace:packages/eslint-plugin-client-contract"],
 

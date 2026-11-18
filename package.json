@@ -42,6 +42,14 @@
     "./eslint-plugin-driver-contract": {
       "types": "./packages/eslint-plugin-driver-contract/dist/index.d.mts",
       "default": "./packages/eslint-plugin-driver-contract/dist/index.mjs"
+    },
+    "./eslint-plugin-arch": {
+      "types": "./packages/eslint-plugin-arch/dist/index.d.mts",
+      "default": "./packages/eslint-plugin-arch/dist/index.mjs"
+    },
+    "./eslint-config-arch": {
+      "types": "./packages/eslint-config-arch/dist/index.d.mts",
+      "default": "./packages/eslint-config-arch/dist/index.mjs"
     }
   },
   "scripts": {

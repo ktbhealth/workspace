@@ -16,10 +16,7 @@
 type AstNode = any;
 type RuleContext = {
   filename: string;
-  report: (diagnostic: {
-    node: AstNode;
-    message: string;
-  }) => void;
+  report: (diagnostic: { node: AstNode; message: string }) => void;
 };
 type Visitor = Record<string, ((node: AstNode) => void) | undefined>;
 type Rule = {
