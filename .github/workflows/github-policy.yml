@@ -17,9 +17,9 @@ env:
   PULUMI_BACKEND_URL: s3://ktbhealth-pulumi-state?endpoint=2c03574ae47e534415b762ab3c474815.r2.cloudflarestorage.com&s3ForcePathStyle=true&region=auto
   PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
   # GITHUB_TOKEN (workflow default) likely lacks admin:org /
-  # admin:org_hook — prefer an org-admin PAT stored as GITHUB_ORG_TOKEN.
-  GITHUB_TOKEN: ${{ secrets.GITHUB_ORG_TOKEN || secrets.GITHUB_TOKEN }}
-  GH_TOKEN: ${{ secrets.GITHUB_ORG_TOKEN || secrets.GITHUB_TOKEN }}
+  # admin:org_hook — prefer an org-admin PAT stored as ORG_ADMIN_TOKEN.
+  GITHUB_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+  GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
   GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
 
 jobs:
