@@ -1,0 +1,6 @@
+encryptionsalt: v1:wIqUGqXt0cY=:v1:WoDvE/LdWOiUeSS6:ZBnfblLyWPPF8+bMpEe4ZLRIO0scFw==
+config:
+  ktbhealth:githubWebhookSecret:
+    secure: v1:BDmmPrrZymfFCVLJ:yZyzaSG+hdJ0r1iLFFxPYL+KQ1ueLyMfDlxt9PmHFGc7RufdXp6Y2xbBp+O9s0MbkwIQGVBx5D6sUVtrdSphAt33VL8VOZVZWZ/ycCgID3M=
+  ktbhealth:manageOrgWebhook: "false"
+  github:owner: ktbhealth

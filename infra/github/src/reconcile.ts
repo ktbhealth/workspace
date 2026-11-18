@@ -12,7 +12,7 @@
  * decision: either codify them in src/repos.ts or accept the baseline.
  */
 import { execFileSync } from "node:child_process";
-import { MANAGED_REPO_NAMES } from "./repos";
+import { MANAGED_REPO_NAMES } from "./repos.ts";
 
 const ORG = "ktbhealth";
 

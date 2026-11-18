@@ -51,7 +51,7 @@ jobs:
       - uses: pulumi/actions@v6
         with:
           only-install: true
-      - run: pulumi up --yes --skip-preview --stack ktbhealth/prod
+      - run: pulumi up --yes --skip-preview --stack prod
       # Baseline policy for repos not yet codified in src/repos.ts.
       # Exits 1 while unmanaged repos exist — expected until the list
       # covers the whole org; reconcile still patches them first.

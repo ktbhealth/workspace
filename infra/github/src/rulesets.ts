@@ -1,6 +1,6 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as github from "@pulumi/github";
-import { REPOS } from "./repos";
+import { REPOS } from "./repos.ts";
 
 /**
  * Codifies the org's branch rulesets — 9 existing rulesets mirrored
