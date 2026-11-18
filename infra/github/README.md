@@ -12,8 +12,13 @@ is converged (22 resources, zero drift on `pulumi preview`).
     GitHub Pro, and org policy is to protect `main` everywhere.
 - **`src/rulesets.ts`** — branch rulesets: `main-protected` (deletion +
   non-fast-forward on default branch, bypass luisfuturist/always) on all
-  10 repos, plus product's `guard quality-gate paths` (PR rule on
-  `refs/heads/main`, squash-only merge methods). Direct push stays
+  10 repos, plus `guard quality-gate paths` (PR rule on
+  `refs/heads/main`, squash-only merge methods, code-owner review,
+  bypass team actor 20751573/always) on 7 repos: product (imported,
+  id 27518534) and ui, docs, storybook, website-draft,
+  presentation-draft, slidev-theme-ktb (created fresh — each got a
+  minimal `.github/CODEOWNERS` mapping `/.github/workflows/` →
+  `@ktbhealth/code-owners`). Direct push stays
   allowed — no PR-required gate (org decision, myco T-054).
 - **Org webhook** — `github.OrganizationWebhook` →
   `https://ci.ktbhealth.workers.dev/` (the `ci` worker in

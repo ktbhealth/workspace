@@ -10,7 +10,7 @@ import { REPOS } from "./repos.ts";
  * Per org decision (myco T-054) there is deliberately NO
  * pull_request_required rule: direct push stays allowed for all members;
  * these rulesets only block branch deletion, force-push, and (on
- * product) unreviewed path changes.
+ * product) unreviewed path changes (now on all 7 guard-coverage repos).
  *
  * website-draft and presentation-draft had NO rulesets while private
  * (free plan). This program flips them public (see repos.ts), so they
@@ -54,8 +54,28 @@ const MAIN_PROTECTED_REPOS = [
 ] as const;
 
 /**
- * product "guard quality-gate paths" (ruleset id 27518534) — verbatim
- * codification of `gh api repos/ktbhealth/product/rulesets/27518534`.
+ * Repos carrying "guard quality-gate paths" — a pull-request rule scoped
+ * to refs/heads/main with code-owner review, so CI/workflow changes
+ * (mapped to @ktbhealth/code-owners via each repo's .github/CODEOWNERS)
+ * cannot auto-merge unreviewed under the pr-review campaign.
+ * Product's ruleset (id 27518534) was the template; the other six repos
+ * got the identical shape + a minimal CODEOWNERS covering
+ * /.github/workflows/ in the same change.
+ */
+const GUARD_QUALITY_GATE_REPOS = [
+  "product",
+  "ui",
+  "docs",
+  "storybook",
+  "website-draft",
+  "presentation-draft",
+  "slidev-theme-ktb",
+] as const;
+
+/**
+ * "guard quality-gate paths" — verbatim codification of
+ * `gh api repos/ktbhealth/product/rulesets/27518534`, applied to every
+ * repo in GUARD_QUALITY_GATE_REPOS.
  * Pull-request rule scoped to refs/heads/main with code-owner review;
  * bypass: team actor 20751573, always.
  */
@@ -81,29 +101,31 @@ export const registerRulesets = (opts: pulumi.ResourceOptions): void => {
     );
   }
 
-  new github.RepositoryRuleset(
-    "ruleset-product-guard-quality-gate-paths",
-    {
-      repository: repoName("product"),
-      name: "guard quality-gate paths",
-      target: "branch",
-      enforcement: "active",
-      conditions: {
-        refName: { includes: ["refs/heads/main"], excludes: [] },
-      },
-      rules: {
-        pullRequest: {
-          requiredApprovingReviewCount: 0,
-          dismissStaleReviewsOnPush: false,
-          requireCodeOwnerReview: true,
-          requireLastPushApproval: false,
-          requiredReviewThreadResolution: false,
-          requiredReviewers: [],
-          allowedMergeMethods: ["squash"],
+  for (const name of GUARD_QUALITY_GATE_REPOS) {
+    new github.RepositoryRuleset(
+      `ruleset-${name}-guard-quality-gate-paths`,
+      {
+        repository: repoName(name),
+        name: "guard quality-gate paths",
+        target: "branch",
+        enforcement: "active",
+        conditions: {
+          refName: { includes: ["refs/heads/main"], excludes: [] },
         },
+        rules: {
+          pullRequest: {
+            requiredApprovingReviewCount: 0,
+            dismissStaleReviewsOnPush: false,
+            requireCodeOwnerReview: true,
+            requireLastPushApproval: false,
+            requiredReviewThreadResolution: false,
+            requiredReviewers: [],
+            allowedMergeMethods: ["squash"],
+          },
+        },
+        bypassActors: [{ actorType: "Team", actorId: 20751573, bypassMode: "always" }],
       },
-      bypassActors: [{ actorType: "Team", actorId: 20751573, bypassMode: "always" }],
-    },
-    opts,
-  );
+      opts,
+    );
+  }
 };
