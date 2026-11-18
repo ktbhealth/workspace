@@ -42,3 +42,28 @@ All accept `--root <dir>`; `lasius.toml` is found upward from cwd.
 | `repos/.github`            | Org profile README + community health files                                   |
 
 See [AGENTS.md](AGENTS.md) for org rules; each repo has its own `AGENTS.md`.
+
+## Lint plugin packages
+
+`packages/eslint-plugin-*` are standalone [Oxlint JS
+plugins](https://oxc.rs/docs/guide/usage/linter/js-plugins.html) — one per
+architecture rule, no shared dependencies. Each builds to `dist/` via
+`vp pack` (`bun run build`) and is consumed through the root `exports`
+map, e.g. `@ktbhealth/workspace/eslint-plugin-no-hardcoded-colors` —
+which maps to plugin id `arch-colors` and rule
+`arch-colors/no-hardcoded-colors`:
+
+| package                               | plugin id              | rule                    |
+| ------------------------------------- | ---------------------- | ----------------------- |
+| `eslint-plugin-no-hardcoded-colors`   | `arch-colors`          | `no-hardcoded-colors`   |
+| `eslint-plugin-provider-lockin`       | `arch-provider`        | `provider-lockin`       |
+| `eslint-plugin-package-boundary`      | `arch-boundary`        | `package-boundary`      |
+| `eslint-plugin-tenant-scope`          | `arch-tenant`          | `tenant-scope`          |
+| `eslint-plugin-plugin-contract`       | `arch-plugin-contract` | `plugin-contract`       |
+| `eslint-plugin-plugin-route-gate`     | `arch-route-gate`      | `plugin-route-gate`     |
+| `eslint-plugin-plugin-api-route-gate` | `arch-api-route-gate`  | `plugin-api-route-gate` |
+| `eslint-plugin-client-contract`       | `arch-client`          | `client-contract`       |
+| `eslint-plugin-driver-contract`       | `arch-driver`          | `driver-contract`       |
+
+Enable per-glob in a consumer's `vite.config.ts` via `lint.jsPlugins` +
+`lint.overrides` — see each package's README for the exact config.

@@ -1,0 +1,57 @@
+{
+  "name": "@ktbhealth/workspace",
+  "version": "0.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "type": "module",
+  "exports": {
+    "./eslint-plugin-no-hardcoded-colors": {
+      "types": "./packages/eslint-plugin-no-hardcoded-colors/dist/index.d.mts",
+      "default": "./packages/eslint-plugin-no-hardcoded-colors/dist/index.mjs"
+    },
+    "./eslint-plugin-provider-lockin": {
+      "types": "./packages/eslint-plugin-provider-lockin/dist/index.d.mts",
+      "default": "./packages/eslint-plugin-provider-lockin/dist/index.mjs"
+    },
+    "./eslint-plugin-package-boundary": {
+      "types": "./packages/eslint-plugin-package-boundary/dist/index.d.mts",
+      "default": "./packages/eslint-plugin-package-boundary/dist/index.mjs"
+    },
+    "./eslint-plugin-tenant-scope": {
+      "types": "./packages/eslint-plugin-tenant-scope/dist/index.d.mts",
+      "default": "./packages/eslint-plugin-tenant-scope/dist/index.mjs"
+    },
+    "./eslint-plugin-plugin-contract": {
+      "types": "./packages/eslint-plugin-plugin-contract/dist/index.d.mts",
+      "default": "./packages/eslint-plugin-plugin-contract/dist/index.mjs"
+    },
+    "./eslint-plugin-plugin-route-gate": {
+      "types": "./packages/eslint-plugin-plugin-route-gate/dist/index.d.mts",
+      "default": "./packages/eslint-plugin-plugin-route-gate/dist/index.mjs"
+    },
+    "./eslint-plugin-plugin-api-route-gate": {
+      "types": "./packages/eslint-plugin-plugin-api-route-gate/dist/index.d.mts",
+      "default": "./packages/eslint-plugin-plugin-api-route-gate/dist/index.mjs"
+    },
+    "./eslint-plugin-client-contract": {
+      "types": "./packages/eslint-plugin-client-contract/dist/index.d.mts",
+      "default": "./packages/eslint-plugin-client-contract/dist/index.mjs"
+    },
+    "./eslint-plugin-driver-contract": {
+      "types": "./packages/eslint-plugin-driver-contract/dist/index.d.mts",
+      "default": "./packages/eslint-plugin-driver-contract/dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "vp run -r build",
+    "test": "vp test",
+    "check": "vp check"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2",
+    "vite-plus": "1.5.1",
+    "vitest": "5.1.0"
+  }
+}

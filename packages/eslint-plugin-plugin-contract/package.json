@@ -1,0 +1,24 @@
+{
+  "name": "eslint-plugin-plugin-contract",
+  "version": "0.1.0",
+  "description": "Oxlint JS plugin: plugin entry files must export `plugins` — a non-empty array of definePlugin({...}) calls for host discovery.",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "vp pack src/index.ts --dts",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2",
+    "vite-plus": "1.5.1",
+    "vitest": "5.1.0"
+  }
+}
