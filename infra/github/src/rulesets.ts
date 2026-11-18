@@ -28,11 +28,11 @@ import { REPOS } from "./repos.ts";
 const BYPASS_USER = { actorType: "User", actorId: 91754457, bypassMode: "always" } as const;
 
 const repoName = (name: string): string => {
-	const repo = REPOS.find((candidate) => candidate.name === name);
-	if (!repo) {
-		throw new Error(`rulesets.ts references unmanaged repo "${name}" — add it to repos.ts`);
-	}
-	return repo.name;
+  const repo = REPOS.find((candidate) => candidate.name === name);
+  if (!repo) {
+    throw new Error(`rulesets.ts references unmanaged repo "${name}" — add it to repos.ts`);
+  }
+  return repo.name;
 };
 
 /**
@@ -41,16 +41,16 @@ const repoName = (name: string): string => {
  * (existing rulesets — IDs in README), 2 created fresh here.
  */
 const MAIN_PROTECTED_REPOS = [
-	"product",
-	"ui",
-	"storybook",
-	"project",
-	"docs",
-	"slidev-theme-ktb",
-	".github",
-	"workspace",
-	"website-draft",
-	"presentation-draft",
+  "product",
+  "ui",
+  "storybook",
+  "project",
+  "docs",
+  "slidev-theme-ktb",
+  ".github",
+  "workspace",
+  "website-draft",
+  "presentation-draft",
 ] as const;
 
 /**
@@ -60,50 +60,50 @@ const MAIN_PROTECTED_REPOS = [
  * bypass: team actor 20751573, always.
  */
 export const registerRulesets = (opts: pulumi.ResourceOptions): void => {
-	for (const name of MAIN_PROTECTED_REPOS) {
-		new github.RepositoryRuleset(
-			`ruleset-${name}-main-protected`,
-			{
-				repository: repoName(name),
-				name: "main-protected",
-				target: "branch",
-				enforcement: "active",
-				conditions: {
-					refName: { includes: ["~DEFAULT_BRANCH"], excludes: [] },
-				},
-				rules: {
-					deletion: true,
-					nonFastForward: true,
-				},
-				bypassActors: [BYPASS_USER],
-			},
-			opts,
-		);
-	}
+  for (const name of MAIN_PROTECTED_REPOS) {
+    new github.RepositoryRuleset(
+      `ruleset-${name}-main-protected`,
+      {
+        repository: repoName(name),
+        name: "main-protected",
+        target: "branch",
+        enforcement: "active",
+        conditions: {
+          refName: { includes: ["~DEFAULT_BRANCH"], excludes: [] },
+        },
+        rules: {
+          deletion: true,
+          nonFastForward: true,
+        },
+        bypassActors: [BYPASS_USER],
+      },
+      opts,
+    );
+  }
 
-	new github.RepositoryRuleset(
-		"ruleset-product-guard-quality-gate-paths",
-		{
-			repository: repoName("product"),
-			name: "guard quality-gate paths",
-			target: "branch",
-			enforcement: "active",
-			conditions: {
-				refName: { includes: ["refs/heads/main"], excludes: [] },
-			},
-			rules: {
-				pullRequest: {
-					requiredApprovingReviewCount: 0,
-					dismissStaleReviewsOnPush: false,
-					requireCodeOwnerReview: true,
-					requireLastPushApproval: false,
-					requiredReviewThreadResolution: false,
-					requiredReviewers: [],
-					allowedMergeMethods: ["squash"],
-				},
-			},
-			bypassActors: [{ actorType: "Team", actorId: 20751573, bypassMode: "always" }],
-		},
-		opts,
-	);
+  new github.RepositoryRuleset(
+    "ruleset-product-guard-quality-gate-paths",
+    {
+      repository: repoName("product"),
+      name: "guard quality-gate paths",
+      target: "branch",
+      enforcement: "active",
+      conditions: {
+        refName: { includes: ["refs/heads/main"], excludes: [] },
+      },
+      rules: {
+        pullRequest: {
+          requiredApprovingReviewCount: 0,
+          dismissStaleReviewsOnPush: false,
+          requireCodeOwnerReview: true,
+          requireLastPushApproval: false,
+          requiredReviewThreadResolution: false,
+          requiredReviewers: [],
+          allowedMergeMethods: ["squash"],
+        },
+      },
+      bypassActors: [{ actorType: "Team", actorId: 20751573, bypassMode: "always" }],
+    },
+    opts,
+  );
 };

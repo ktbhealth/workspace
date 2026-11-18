@@ -30,47 +30,39 @@ const config = new pulumi.Config("ktbhealth");
 // No explicit provider resource: imports bind to the default provider,
 // and the org is pinned via `github:owner` config / GITHUB_OWNER env.
 for (const repo of REPOS) {
-	new github.Repository(
-		`repo-${repo.name}`,
-		{
-			name: repo.name,
-			visibility: "public",
-			allowSquashMerge: true,
-			allowMergeCommit: false,
-			allowRebaseMerge: false,
-			deleteBranchOnMerge: true,
-			hasIssues: repo.hasIssues,
-			hasWiki: repo.hasWiki,
-			hasProjects: repo.hasProjects,
-		},
-		{
-			// Only the fields above are policy. Everything else on the repo
-			// (description, homepageUrl, topics, …) is unmanaged — without
-			// ignoreChanges Pulumi would null them out on update.
-			ignoreChanges: [
-				"description",
-				"homepageUrl",
-				"topics",
-				"securityAndAnalysis",
-			],
-		},
-	);
+  new github.Repository(
+    `repo-${repo.name}`,
+    {
+      name: repo.name,
+      visibility: "public",
+      allowSquashMerge: true,
+      allowMergeCommit: false,
+      allowRebaseMerge: false,
+      deleteBranchOnMerge: true,
+      hasIssues: repo.hasIssues,
+      hasWiki: repo.hasWiki,
+      hasProjects: repo.hasProjects,
+    },
+    {
+      // Only the fields above are policy. Everything else on the repo
+      // (description, homepageUrl, topics, …) is unmanaged — without
+      // ignoreChanges Pulumi would null them out on update.
+      ignoreChanges: ["description", "homepageUrl", "topics", "securityAndAnalysis"],
+    },
+  );
 }
 
 const manageOrgWebhook = config.getBoolean("manageOrgWebhook") ?? true;
 registerRulesets({ protect: true });
 if (manageOrgWebhook) {
-	new github.OrganizationWebhook(
-		"org-webhook-ci",
-		{
-			active: true,
-			events: ["repository", "workflow_run"],
-			configuration: {
-				url: "https://ci.ktbhealth.workers.dev/",
-				contentType: "json",
-				insecureSsl: false,
-				secret: config.requireSecret("githubWebhookSecret"),
-			},
-		},
-	);
+  new github.OrganizationWebhook("org-webhook-ci", {
+    active: true,
+    events: ["repository", "workflow_run"],
+    configuration: {
+      url: "https://ci.ktbhealth.workers.dev/",
+      contentType: "json",
+      insecureSsl: false,
+      secret: config.requireSecret("githubWebhookSecret"),
+    },
+  });
 }
