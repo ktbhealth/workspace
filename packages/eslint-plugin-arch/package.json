@@ -1,6 +1,6 @@
 {
   "name": "eslint-plugin-arch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Oxlint JS plugin bundle: all nine ktbhealth architecture rules under one `arch` plugin id (arch/<rule>) — self-contained, no sibling package deps.",
   "files": [
     "dist"

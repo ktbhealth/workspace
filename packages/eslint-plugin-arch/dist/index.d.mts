@@ -37,7 +37,10 @@ declare const plugin: {
     "no-hardcoded-colors": {
       create: (context: {
         filename: string;
-        report: (diagnostic: { node: any; message: string }) => void;
+        report: (diagnostic: {
+          node: any;
+          message: string;
+        }) => void;
       }) => {
         [x: string]: ((node: any) => void) | undefined;
       };
@@ -45,7 +48,10 @@ declare const plugin: {
     "provider-lockin": {
       create: (context: {
         filename: string;
-        report: (diagnostic: { node: any; message: string }) => void;
+        report: (diagnostic: {
+          node: any;
+          message: string;
+        }) => void;
       }) => {
         [x: string]: ((node: any) => void) | undefined;
       };
@@ -53,7 +59,10 @@ declare const plugin: {
     "package-boundary": {
       create: (context: {
         filename: string;
-        report: (diagnostic: { node: any; message: string }) => void;
+        report: (diagnostic: {
+          node: any;
+          message: string;
+        }) => void;
       }) => {
         [x: string]: ((node: any) => void) | undefined;
       };
@@ -61,7 +70,10 @@ declare const plugin: {
     "tenant-scope": {
       create: (context: {
         filename: string;
-        report: (diagnostic: { node: any; message: string }) => void;
+        report: (diagnostic: {
+          node: any;
+          message: string;
+        }) => void;
       }) => {
         [x: string]: ((node: any) => void) | undefined;
       };
@@ -72,7 +84,10 @@ declare const plugin: {
     "plugin-contract": {
       create: (context: {
         filename: string;
-        report: (diagnostic: { node: any; message: string }) => void;
+        report: (diagnostic: {
+          node: any;
+          message: string;
+        }) => void;
       }) => {
         [x: string]: ((node: any) => void) | undefined;
       };
@@ -80,7 +95,10 @@ declare const plugin: {
     "plugin-route-gate": {
       create: (context: {
         filename: string;
-        report: (diagnostic: { node: any; message: string }) => void;
+        report: (diagnostic: {
+          node: any;
+          message: string;
+        }) => void;
       }) => {
         [x: string]: ((node: any) => void) | undefined;
       };
@@ -88,7 +106,10 @@ declare const plugin: {
     "plugin-api-route-gate": {
       create: (context: {
         filename: string;
-        report: (diagnostic: { node: any; message: string }) => void;
+        report: (diagnostic: {
+          node: any;
+          message: string;
+        }) => void;
       }) => {
         [x: string]: ((node: any) => void) | undefined;
       };
@@ -96,7 +117,10 @@ declare const plugin: {
     "client-contract": {
       create: (context: {
         filename: string;
-        report: (diagnostic: { node: any; message: string }) => void;
+        report: (diagnostic: {
+          node: any;
+          message: string;
+        }) => void;
       }) => {
         [x: string]: ((node: any) => void) | undefined;
       };
@@ -104,7 +128,10 @@ declare const plugin: {
     "driver-contract": {
       create: (context: {
         filename: string;
-        report: (diagnostic: { node: any; message: string }) => void;
+        report: (diagnostic: {
+          node: any;
+          message: string;
+        }) => void;
       }) => {
         [x: string]: ((node: any) => void) | undefined;
       };

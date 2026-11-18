@@ -40,6 +40,10 @@ const CLIENT_IMPORT_ALLOWLIST = [
   "react-dom",
   "@tanstack/react-router",
   "@tanstack/virtual-file-routes",
+  // Client-safe view subpath: plugins/audit's activity-page wrapper is
+  // dependency-light (view + kernel types only) so consumer plugins can
+  // mount the shared audit feed without dragging in the server graph.
+  "@ktb/audit/activity-page",
 ];
 const CLIENT_RELATIVE_RE = /^\.\.?\/.*\.tsx$/;
 

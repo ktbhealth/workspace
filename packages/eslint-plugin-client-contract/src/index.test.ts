@@ -45,6 +45,7 @@ describe("arch-client/client-contract", () => {
     expect(visit("@ktbhealth/ui/components/button")).toHaveLength(0);
     expect(visit("react")).toHaveLength(0);
     expect(visit("./view.tsx")).toHaveLength(0);
+    expect(visit("@ktb/audit/activity-page")).toHaveLength(0);
     expect(visit("@ktb/db", "type")).toHaveLength(0);
   });
 
