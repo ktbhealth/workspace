@@ -18,11 +18,6 @@
       "description": "Local clone path lasius operates on — REQUIRED per deployment.",
       "default": ""
     },
-    "node_url": {
-      "type": "string",
-      "description": "Base URL of `peregrin serve` (sessions + entity plane). Default http://127.0.0.1:18787.",
-      "default": "http://127.0.0.1:18787"
-    },
     "worktree_base": {
       "type": "string",
       "description": "Detached review worktrees, the per-PR attempt ledger, and the per-sha PR map land here.",

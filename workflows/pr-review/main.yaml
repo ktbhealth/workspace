@@ -3,7 +3,7 @@
 #
 # ktbhealth variant of 9aia's pr-heal bundle: same boundaries (lasius
 # owns every git/forge call, sepia owns the agent session via the
-# node's POST /api/sessions/run, peregrin owns only event routing),
+# node's `sessions.*` ops queries, peregrin owns only event routing),
 # different trigger and a forge-native CI signal — ktbhealth repos CI
 # on GitHub Actions, so completion arrives as check_run/check_suite/
 # status webhook deliveries and the merge gate is `lasius forge pr
@@ -33,17 +33,34 @@
 # `${event.match.1}`); the pull_request payload's number/ref/base_ref
 # are persisted under `<worktree_base>/prs/<sha>` at guard time so
 # downstream nodes never re-derive them (the engine has no
-# stdout→state channel, and `driver: ops` results carry the driver's
-# stdout as an unparsed string — anything needing jq or per-sha file
-# state stays on `driver: shell`).
+# stdout→state channel — anything needing jq or per-sha file
+# state stays on `driver: shell`; the agent chain passes its prompt
+# and session id through ops `echo` payload paths instead).
 #
 # `driver: ops` nodes spawn `tamias serve` per fire and send ONE
-# `driver.query` (`cli.<verb>` on the lasius ops manifest) — used
-# wherever a node's work is a single lasius call (vcs fetch /
-# worktree remove+add / commit). Composite nodes (guard + PR-map
-# write, attempt ledger, agent session curl, push branch resolution,
-# the merge gate's checks rollup + conflict classification, cleanup)
-# stay `driver: shell`.
+# `driver.query` (`cli.<verb>` on the lasius ops manifest, or
+# `sessions.<method>` on the sepia ops manifest) — used wherever a
+# node's work is a single driver call (vcs fetch / worktree
+# remove+add / commit / the sepia session plane). Composite nodes
+# (guard + PR-map write, attempt ledger, agent prompt assembly,
+# push branch resolution, the merge gate's checks rollup + conflict
+# classification, cleanup, the turn-result gate) stay
+# `driver: shell`.
+#
+# The agent review is a THREE-call sepia session plane chain —
+# `sessions.create` → `sessions.set_mode` → `sessions.prompt_wait` —
+# because no single serve method covers create+prompt, and `mode`
+# (config.agent_mode) is a separate `session/set_mode` call. The
+# session id rides `echo: ["result.data.id"]` forward through the
+# emitted payloads; the assembled prompt text rides `echo: ["stdout"]`
+# the same way (the prep node's stdout IS the prompt). `prompt_wait`
+# blocks until the turn settles — same contract the old
+# POST /api/sessions/run had — and a shell gate node re-applies the
+# old stopReason/timedOut predicate the ops emit map can't express.
+#
+# Caveat: bypassing /api/sessions/run means the peregrin node
+# session registry is NOT involved — these sessions live purely in
+# sepia's plane, invisible to `peregrin serve` session tooling.
 name: pr-review
 
 annotations:
@@ -67,9 +84,6 @@ config:
   # Env var holding this repo's webhook HMAC secret — the
   # BUPHA_WH_<OWNER>_<REPO> convention (uppercased, - → _). REQUIRED.
   webhook_secret_env: ""
-  # Base URL of `peregrin serve` — sessions + entity plane. The agent
-  # step POSTs /api/sessions/run here; bearer = PEREGRIN_TOKEN.
-  node_url: "http://127.0.0.1:18787"
   # Local clone lasius operates on (any checkout path — not required
   # to live inside a lasius workspace). REQUIRED per deployment.
   checkout: ""
@@ -99,13 +113,11 @@ config:
   lasius_root: "/home/luis/GitHub/ktbhealth"
 
 # Secret NAMES only — values live in ~/.config/peregrin/env (or cuora).
-# PEREGRIN_TOKEN always; the webhook HMAC env var named by
-# config.webhook_secret_env must ALSO be declared — the cuora/keyring
-# secret legs are `declared_only`, so an undeclared name resolves ONLY
-# via the plaintext env file.
+# The webhook HMAC env var named by config.webhook_secret_env must be
+# declared — the cuora/keyring secret legs are `declared_only`, so an
+# undeclared name resolves ONLY via the plaintext env file.
 capabilities:
   secrets:
-    - PEREGRIN_TOKEN
     - BUPHA_WH_*
 
 # No `events:` block — every subscribed type (pull_request, check_run,
@@ -299,18 +311,42 @@ nodes:
     timeout: 60
 
 # --- review: sepia agent session — review + adjust, do not commit ------
-# POST /api/sessions/run on the node: create session + blocking
-# prompt_wait in one call. shell+curl (not driver:http) so the emitted
-# event can carry the sha — and so the bearer token rides curl's
-# --config stdin instead of `ps` argv. `mode` is REQUIRED: devin's
-# default prompts on exec and an unattended turn deadlocks.
-- id: pr-review.agent
+# The agent turn is a THREE-call chain over the sepia session plane
+# (tamias-driver-sepia's `sessions.*` ops queries): create the
+# session in the review worktree, apply config.agent_mode via
+# session/set_mode (REQUIRED — devin's default accept-edits prompts
+# on exec and an unattended turn deadlocks), then a BLOCKING
+# sessions.prompt_wait — same contract the old POST
+# /api/sessions/run had: done/failed emit as soon as the turn
+# settles, no polling. No single serve method covers
+# create+prompt+mode, so the chain is three `driver: ops` nodes.
+#
+# Data passing uses the ops driver's `echo` (payload-path copy):
+#   - the session id rides `result.data.id` — create's
+#     QueryResult.data.id echoed forward through set_mode to
+#     prompt_wait's `id` param;
+#   - the assembled prompt rides `stdout` — this prep node prints
+#     ONLY the prompt text to stdout (diagnostics go to stderr), the
+#     shell driver's emit payload carries it as `payload.stdout`, and
+#     each ops node echoes it forward to prompt_wait's `text` param.
+#     (`${file()}`/`${shell()}` template fns can't help here: their
+#     args are literals — no nested ${} resolution — and the
+#     prompt path embeds the per-fire sha.)
+#
+# `pr-review.agent.gate` re-applies the old jq predicate
+# (stopReason end_turn|cancelled AND !timedOut) — the ops emit map
+# only sees wire ok/failure, not PromptWaitResult content — and
+# releases the per-sha lock at turn end, exactly like the old node's
+# EXIT trap. `pr-review.cleanup.agentfail` releases it on wire-level
+# failures (create/mode/prompt_wait ok:false) the gate never sees.
+- id: pr-review.agent.prompt
   driver: shell
   on:
   - pr-review.attempts.ok.*
   emits:
-  - pr-review.agent.done.*
+  - pr-review.agent.prompt.ready.*
   - pr-review.agent.failed.*
+  - pr-review.agent.busy.*
   # Per-PR attempt cap lives in pr-review.attempts (durable ledger);
   # max_fires stays as a campaign-lifetime circuit breaker only.
   max_fires: 50
@@ -319,30 +355,33 @@ nodes:
     delay: 5000
     backoff: fixed
   params:
-    env:
-      PRREVIEW_TOKEN: "${secret.PEREGRIN_TOKEN}"
     cmd: |
       set -euo pipefail
       SHA='${event.match.1}'
-      WT="${config.worktree_base}/${SHA}"
       MAP="${config.worktree_base}/prs/${SHA}"
       NUMBER=$(sed -n '1p' "$MAP")
       BRANCH=$(sed -n '2p' "$MAP")
       BASE=$(sed -n '3p' "$MAP")
       # Per-sha lock: a retried/duplicated pull_request for the same
-      # sha must not start a parallel agent on the same worktree.
+      # sha must not start a parallel agent on the same worktree. The
+      # lock is held by the CHAIN (released by the gate node or the
+      # agentfail cleanup), so this node's EXIT trap only releases it
+      # when THIS node fails — a busy lock (exit 3) belongs to the
+      # in-flight chain and must survive.
       LOCK="${config.worktree_base}/${SHA}.agent-lock"
       if ! mkdir "$LOCK" 2>/dev/null; then
-        echo "review already in flight for $SHA"
-        exit 1
+        echo "review already in flight for $SHA" >&2
+        exit 3
       fi
-      trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+      trap 'rc=$?; if [ "$rc" -ne 0 ]; then rmdir "$LOCK" 2>/dev/null || true; fi' EXIT
       # PR title/body for the prompt — best effort, never fatal.
       PRJSON=$(lasius --root "${config.lasius_root}" forge pr view "${config.checkout}" "$NUMBER" --json 2>/dev/null || true)
       TITLE=$(printf '%s' "$PRJSON" | jq -r '.title // empty' 2>/dev/null || true)
       BODY=$(printf '%s' "$PRJSON" | jq -r '.body // empty' 2>/dev/null | head -c 2000 || true)
-      PROMPT=$(jq -n \
-        --arg cwd "$WT" \
+      # stdout IS the payload: print ONLY the prompt text (jq -r),
+      # diagnostics to stderr. cwd/agent/mode/timeout are wire params
+      # on the ops nodes now, not prompt fields.
+      jq -nr \
         --arg number "$NUMBER" \
         --arg branch "$BRANCH" \
         --arg base "$BASE" \
@@ -350,30 +389,160 @@ nodes:
         --arg title "$TITLE" \
         --arg body "$BODY" \
         --arg verify "${config.verify_cmd}" \
-        --arg agent "${config.agent}" \
-        --arg mode "${config.agent_mode}" \
-        '{cwd:$cwd, agent:$agent, mode:$mode, timeoutMs:1800000, text:(
-          "You are reviewing pull request #\($number) (\($branch) → \($base), head \($sha)) in this worktree.\n\n" +
-          "Title: \($title)\n\nDescription:\n\($body)\n\n" +
-          "1. Review the diff of this branch against \($base) — correctness, edge cases, and the repository conventions in AGENTS.md.\n" +
-          "2. Apply the adjustments that are actually needed — do not churn the diff for style alone.\n" +
-          "3. Run `\($verify)` and leave it passing.\n" +
-          "4. If the only changes present are a previous review pass by this workflow (commit message starts with \"review:\"), make NO changes — an empty result is a valid outcome.\n\n" +
-          "Do NOT commit, push, or open a PR — leave the changes in the working tree; the campaign commits and pushes."
-        )}')
-      # Bearer via curl --config on stdin: keeps the token out of `ps`
-      # argv (a literal -H "Bearer $TOKEN" would expose it; curl's
-      # --variable {{name}} expansion does not apply to -H headers).
-      RESP=$(printf 'header = "authorization: Bearer %s"\n' "$PRREVIEW_TOKEN" |
-        curl -sf --max-time 1900 --config - \
-        -X POST "${config.node_url}/api/sessions/run" \
-        -H 'content-type: application/json' -d "$PROMPT")
-      echo "$RESP" | jq .
-      printf '%s' "$RESP" | jq -e '(.stopReason == "end_turn" or .stopReason == "cancelled") and (.timedOut != true)' >/dev/null
+        '"You are reviewing pull request #\($number) (\($branch) → \($base), head \($sha)) in this worktree.\n\n" +
+         "Title: \($title)\n\nDescription:\n\($body)\n\n" +
+         "1. Review the diff of this branch against \($base) — correctness, edge cases, and the repository conventions in AGENTS.md.\n" +
+         "2. Apply the adjustments that are actually needed — do not churn the diff for style alone.\n" +
+         "3. Run `\($verify)` and leave it passing.\n" +
+         "4. If the only changes present are a previous review pass by this workflow (commit message starts with \"review:\"), make NO changes — an empty result is a valid outcome.\n\n" +
+         "Do NOT commit, push, or open a PR — leave the changes in the working tree; the campaign commits and pushes."'
+      echo "prompt assembled for PR #$NUMBER (${BRANCH} → ${BASE}) @ ${SHA:0:12}" >&2
+    emit:
+      '0': "pr-review.agent.prompt.ready.${event.match.1}"
+      '3': "pr-review.agent.busy.${event.match.1}"
+      default: "pr-review.agent.failed.${event.match.1}"
+    timeout: 120
+
+# --- review: sessions.create — session in the review worktree ----------
+- id: pr-review.agent.create
+  driver: ops
+  on:
+  - pr-review.agent.prompt.ready.*
+  emits:
+  - pr-review.agent.created.*
+  - pr-review.agent.failed.*
+  max_fires: unlimited
+  retry:
+    max_attempts: 3
+    delay: 5000
+    backoff: fixed
+  params:
+    driver: sepia
+    query: sessions.create
+    params:
+      cwd: "${config.worktree_base}/${event.match.1}"
+      agent: "${config.agent}"
+      title: "pr-review @ ${event.match.1}"
+    # Forward the prompt (payload.stdout) to the next hop; the
+    # session id is already in payload.result.data.id.
+    echo: ["stdout"]
+    emit:
+      success: "pr-review.agent.created.${event.match.1}"
+      failure: "pr-review.agent.failed.${event.match.1}"
+    timeout: 120
+
+# --- review: sessions.set_mode — unattended-turn mode -------------------
+# REQUIRED before prompt: devin's default accept-edits prompts on exec
+# and nothing answers — the turn deadlocks. echo carries BOTH the
+# prompt (stdout) and the session id (result.data.id) forward.
+- id: pr-review.agent.mode
+  driver: ops
+  on:
+  - pr-review.agent.created.*
+  emits:
+  - pr-review.agent.mode.set.*
+  - pr-review.agent.failed.*
+  max_fires: unlimited
+  retry:
+    max_attempts: 3
+    delay: 5000
+    backoff: fixed
+  params:
+    driver: sepia
+    query: sessions.set_mode
+    params:
+      id: "${event.payload.result.data.id}"
+      agent: "${config.agent}"
+      mode: "${config.agent_mode}"
+    echo: ["stdout", "result.data.id"]
+    emit:
+      success: "pr-review.agent.mode.set.${event.match.1}"
+      failure: "pr-review.agent.failed.${event.match.1}"
+    timeout: 120
+
+# --- review: sessions.prompt_wait — blocking turn -----------------------
+# timeoutMs 1740000 (29min) stays under tamias serve's 30min
+# driver.query clamp (the ops `timeout` below forwards as timeout_ms
+# and is clamped there), so a timed-out turn returns its
+# PromptWaitResult — timedOut:true — BEFORE the wire deadline
+# kills the child; the gate node fails it honestly. Old flow was
+# timeoutMs 1800000 under a 1900s curl / 2000s node bound.
+- id: pr-review.agent.run
+  driver: ops
+  on:
+  - pr-review.agent.mode.set.*
+  emits:
+  - pr-review.agent.turn.*
+  - pr-review.agent.failed.*
+  max_fires: unlimited
+  retry:
+    max_attempts: 3
+    delay: 5000
+    backoff: fixed
+  params:
+    driver: sepia
+    query: sessions.prompt_wait
+    params:
+      id: "${event.payload.result.data.id}"
+      agent: "${config.agent}"
+      text: "${event.payload.stdout}"
+      timeoutMs: 1740000
+    emit:
+      success: "pr-review.agent.turn.${event.match.1}"
+      failure: "pr-review.agent.failed.${event.match.1}"
+    timeout: 1900
+
+# --- review: turn-result gate — stopReason/timedOut + lock release -----
+# The ops emit map can't inspect PromptWaitResult content, so this
+# shell node re-applies the old predicate: done only on
+# stopReason end_turn|cancelled with timedOut != true. Releases the
+# per-sha lock at turn end — same point the old node's EXIT trap
+# fired (after the blocking call returned, before commit/push).
+- id: pr-review.agent.gate
+  driver: shell
+  on:
+  - pr-review.agent.turn.*
+  emits:
+  - pr-review.agent.done.*
+  - pr-review.agent.failed.*
+  max_fires: unlimited
+  params:
+    cmd: |
+      set -uo pipefail
+      SHA='${event.match.1}'
+      rmdir "${config.worktree_base}/${SHA}.agent-lock" 2>/dev/null || true
+      SR='${event.payload.result.data.stopReason}'
+      TO='${event.payload.result.data.timedOut}'
+      echo "agent turn @ ${SHA:0:12}: stopReason=${SR:-<none>} timedOut=${TO:-false}"
+      [ "$TO" = "true" ] && exit 1
+      case "$SR" in end_turn|cancelled) exit 0 ;; *) exit 1 ;; esac
     emit:
       '0': "pr-review.agent.done.${event.match.1}"
       default: "pr-review.agent.failed.${event.match.1}"
-    timeout: 2000
+    timeout: 30
+
+# --- cleanup: agent chain failed before/at the wire — release lock -
+# agent.failed.* covers prep-node failures (its trap already released
+# — rmdir is idempotent), ops wire failures (create/mode/
+# prompt_wait ok:false — the gate never ran, lock still held), and
+# gate failures (already released). agent.busy.* is deliberately NOT
+# here: a busy lock belongs to the in-flight chain.
+- id: pr-review.cleanup.agentfail
+  driver: shell
+  on:
+  - pr-review.agent.failed.*
+  emits:
+  - pr-review.cleaned.*
+  max_fires: unlimited
+  params:
+    cmd: |
+      set -uo pipefail
+      SHA='${event.match.1}'
+      rmdir "${config.worktree_base}/${SHA}.agent-lock" 2>/dev/null || true
+      echo "agentfail cleanup for ${SHA:0:12}"
+    emit:
+      '0': "pr-review.cleaned.${event.match.1}"
+    timeout: 30
 
 # --- review: commit the agent's adjustments in the worktree ------------
 # Single lasius call → `driver: ops`. No --allow-empty (the flag stays
@@ -582,6 +751,7 @@ nodes:
   - pr-review.attempts.failed.*
   - pr-review.agent.done.*
   - pr-review.agent.failed.*
+  - pr-review.agent.busy.*
   - pr-review.pushed.*
   - pr-review.push.failed.*
   - pr-review.cleaned.*

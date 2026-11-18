@@ -5,7 +5,8 @@ checks → campaign-driven squash merge.
 
 A tamias-installable peregrin campaign bundle — the ktbhealth
 counterpart of 9aia's `pr-heal`. When a pull request is opened or
-updated, an agent session (sepia — `devin` by default) gets a detached
+updated, an agent session (sepia — `devin` by default, driven through
+`tamias-driver-sepia`'s `sessions.*` ops queries) gets a detached
 worktree at the PR head, reviews the diff against the base branch,
 applies the adjustments that are actually needed, and leaves the tree
 dirty; the campaign commits and pushes through lasius. GitHub
@@ -20,14 +21,24 @@ check rollup, not a `ci.job.completed` inject.
 
 ## Requirements
 
-- **peregrin ≥ the `driver: ops` merge** — the worktree/commit nodes
-  use `driver: ops` (peregrin main `d27ca7b` or later; not yet in a
-  tamias release). Older peregrin builds reject the bundle.
+- **peregrin ≥ the `driver: ops` merge** — the worktree/commit/agent
+  nodes use `driver: ops` (peregrin main `d27ca7b` or later; not yet
+  in a tamias release). Older peregrin builds reject the bundle.
 - **tamias ≥ `662daeb`** — each ops node spawns `tamias serve` and
   sends one `driver.query`; the serve must know the `driver.*` ops.
+- **`tamias-driver-sepia` ≥ 9aia/sepia `3e65c524`** — the agent nodes
+  query `sessions.create`/`sessions.set_mode`/`sessions.prompt_wait`
+  on its ops manifest; older drivers answer `unknown query`.
+- **`sepia` engine resolvable by the driver** — `tamias-driver-sepia`
+  spawns `sepia serve` per query (a sibling `sepia` binary, `$SEPIA_BIN`,
+  `sepiaBin` param, or its own `run serve` fallback). The installed
+  `sepia`/`tamias-driver-sepia` binaries must be refreshed after the
+  sepia bump (`cargo xtask install` / `cargo xtask pack` +
+  `tamias install --allow-drivers ./libraries/sepia`) — a stale
+  driver binary silently lacks the `sessions.*` queries.
 - **`tamias` on the campaign service's PATH** — ops nodes spawn
   `tamias serve` (default `serve_argv`); same PATH requirement the
-  shell nodes already have for `lasius`/`jq`/`curl`.
+  shell nodes already have for `lasius`/`jq`.
 - `lasius` new enough to serve the `cli.vcs.*` ops manifest queries
   (`vcs.fetch`, `vcs.worktree.add/remove`, `vcs.commit`).
 
@@ -36,7 +47,7 @@ check rollup, not a `ci.job.completed` inject.
 | concern | owner |
 | --- | --- |
 | git / forge (worktree, commit, push, PR, merge, checks) | lasius |
-| agent session (create, prompt, mode) | sepia |
+| agent session (create, prompt_wait, set_mode) | sepia — via `sessions.*` ops queries, NOT the node's `/api/sessions/run` (see caveat below) |
 | orchestration, routing, policy | peregrin |
 | webhook verification + event normalization | peregrin `github-webhook` driver |
 | distribution, shims, services | tamias |
@@ -71,7 +82,7 @@ No raw `git`/`gh`/`devin` anywhere in `main.yaml`.
    | `max_review_attempts` | no | per-PR review cap (default 2, durable ledger) |
    | `verify_cmd` | no | check the agent must leave passing (default `bun run check`) |
    | `merge_method` | no | `lasius forge pr merge --method` (default `squash`) |
-   | `worktree_base`, `node_url`, `lasius_root` | no | paths/URLs |
+   | `worktree_base`, `lasius_root` | no | paths (must be absolute — ops params get no shell `$HOME` expansion) |
 
    If the webhook secret env var isn't in `~/.config/peregrin/env`,
    also add its name under `capabilities.secrets` in the same file
@@ -116,6 +127,23 @@ No raw `git`/`gh`/`devin` anywhere in `main.yaml`.
   workflow (or resolve by hand) — the review pass itself may reduce
   how often this happens.
 
+## Caveats
+
+- **Sessions bypass the peregrin node registry** — the agent chain
+  calls `tamias serve` → `tamias-driver-sepia` → `sepia serve`
+  directly, so review sessions live purely in sepia's plane. They do
+  not appear in `peregrin serve` session tooling and carry no
+  PEREGRIN_TOKEN auth (the ops wire is localhost `tamias serve`).
+- **Blocking turn** — `sessions.prompt_wait` blocks up to 29 min
+  (`timeoutMs` 1740000, under tamias serve's 30 min `driver.query`
+  clamp); a timed-out turn is cancelled by sepia and fails the
+  `agent.gate` node honestly (`agent.failed`).
+- **Prompt transport** — the assembled prompt rides event payloads
+  (`echo: ["stdout"]`), not files: the prep node's stdout IS the
+  prompt. `${file()}`/`${shell()}` template functions can't substitute
+  (literal args only, no nested `${}`), which is why prompt assembly
+  stays a shell node.
+
 ## Loop behavior
 
 The agent's push triggers `synchronize` → a second review of its own
@@ -138,3 +166,6 @@ diff retriggers CI, and the merge gate only fires on the live head.
 - Agent locks: `<worktree_base>/<sha>.agent-lock` — stale locks are
   removed by cleanup nodes; delete manually if a run died mid-flight
   (it also blocks merges for that sha until removed).
+- Sepia sessions: review sessions are ordinary sepia sessions —
+  inspect with `sepia list` / the tamias-driver-sepia views; they are
+  NOT registered on the peregrin node.

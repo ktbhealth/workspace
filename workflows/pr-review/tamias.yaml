@@ -5,8 +5,8 @@
 # (GitHub Actions — no bupha fleet on this org).
 #
 # Boundaries: lasius owns every git/forge call, sepia owns the agent
-# session (POST /api/sessions/run → sessions.prompt_wait), peregrin
-# owns only event routing, tamias distributes.
+# session (sessions.create/set_mode/prompt_wait ops queries),
+# peregrin owns only event routing, tamias distributes.
 name: pr-review
 version: "0.1.0"
 type: peregrin-bundle
