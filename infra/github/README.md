@@ -32,9 +32,7 @@ cd infra/github
 bun install
 ```
 
-State backend: Cloudflare R2 DIY backend (S3-compatible). **The live
-stack currently sits on the local backend (`file://~`) as an interim** —
-migrate once R2 S3 credentials exist:
+State backend: Cloudflare R2 DIY backend (live since 2026-11-18):
 
 ```sh
 export AWS_ACCESS_KEY_ID=...        # cuora://ktb/r2-access-key-id (pending)
@@ -43,10 +41,6 @@ export AWS_REGION=auto
 export PULUMI_BACKEND_URL="s3://ktbhealth-pulumi-state?endpoint=2c03574ae47e534415b762ab3c474815.r2.cloudflarestorage.com&s3ForcePathStyle=true&region=auto"
 export PULUMI_CONFIG_PASSPHRASE=... # cuora://ktb/pulumi-passphrase
 ```
-
-Migration path: `pulumi stack export > stack.json` → `pulumi login`
-against the R2 backend → `pulumi stack init prod --secrets-provider
-passphrase` → `pulumi stack import < stack.json`.
 
 Or let cuora inject secrets: `cuora run --env prod -- pulumi preview`
 (this directory has its own `cuora.toml`; the R2 key refs are declared

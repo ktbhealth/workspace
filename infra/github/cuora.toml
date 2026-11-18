@@ -30,5 +30,5 @@ PULUMI_CONFIG_PASSPHRASE = "cuora://ktb/pulumi-passphrase"
 GITHUB_WEBHOOK_SECRET = "cuora://ktb/github-webhook-secret"
 # R2 state-backend credentials (minted separately — uncomment once
 # `cuora put` has stored them):
-# AWS_ACCESS_KEY_ID = "cuora://ktb/r2-access-key-id"
-# AWS_SECRET_ACCESS_KEY = "cuora://ktb/r2-secret-access-key"
+AWS_ACCESS_KEY_ID = "cuora://ktb/r2-access-key-id"
+AWS_SECRET_ACCESS_KEY = "cuora://ktb/r2-secret-access-key"
