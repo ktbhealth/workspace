@@ -134,9 +134,27 @@ capabilities:
 # check_suite, status) is emitted by the github-webhook driver itself;
 # there is no external inject channel (no bupha on ktbhealth).
 
-# No supersede: each pull_request delivery carries a distinct head sha
-# and each check delivery a distinct verdict — keying on (repo, sha)
-# would cancel legitimate work.
+# Queue policy (peregrin docs/reference/queue-supersede.md): under
+# `campaign serve` every trigger event is a queued run, and an
+# UNDECLARED `supersede:` defaults to an empty key template — a
+# constant key — so `latest-wins` evicts the pending job for ANY
+# trigger. A burst of check deliveries arriving while a long agent
+# review holds the single run slot then collapses to whichever
+# delivery landed last *globally*: every queued signal for a sha can
+# be displaced by unrelated shas' deliveries before it ever reaches
+# ci.route (observed on product@c468dd18 — two full check batches,
+# all `*.superseded`, merge gate never evaluated). Keying on {sha}
+# scopes latest-wins coalescing to one pending job per head sha:
+# duplicate check deliveries for the same sha still collapse to the
+# newest (the merge gate re-derives the full `pr checks` rollup, so
+# only the latest signal matters), while different shas, PRs, and
+# pull_request triggers queue independently instead of evicting each
+# other. `cancel_running` stays false — a newer trigger must never
+# kill an in-flight agent review or merge run.
+supersede:
+  key: "{sha}"
+  mode: latest-wins
+  cancel_running: false
 
 nodes:
   # --- ingress: verified deliveries for the watched repo -----------------
