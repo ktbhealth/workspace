@@ -143,16 +143,22 @@ capabilities:
 # delivery landed last *globally*: every queued signal for a sha can
 # be displaced by unrelated shas' deliveries before it ever reaches
 # ci.route (observed on product@c468dd18 — two full check batches,
-# all `*.superseded`, merge gate never evaluated). Keying on {sha}
-# scopes latest-wins coalescing to one pending job per head sha:
-# duplicate check deliveries for the same sha still collapse to the
-# newest (the merge gate re-derives the full `pr checks` rollup, so
-# only the latest signal matters), while different shas, PRs, and
-# pull_request triggers queue independently instead of evicting each
-# other. `cancel_running` stays false — a newer trigger must never
-# kill an in-flight agent review or merge run.
+# all `*.superseded`, merge gate never evaluated). Keying on
+# {sha}:{number} scopes latest-wins coalescing per head sha AND keeps
+# the two trigger families apart: `pull_request` payloads carry
+# `number` (the PR number) while check_run/check_suite/status
+# payloads don't, so an unresolved `{number}` stays literal and every
+# CI delivery for a sha shares one key — duplicate check deliveries
+# still collapse to the newest (the merge gate re-derives the full
+# `pr checks` rollup, so only the latest signal matters), while a
+# pending pull_request trigger can never be evicted by same-sha CI
+# deliveries (which would silently skip the agent review yet still
+# let the merge gate merge). Different shas, PRs, and trigger kinds
+# queue independently instead of evicting each other.
+# `cancel_running` stays false — a newer trigger must never kill an
+# in-flight agent review or merge run.
 supersede:
-  key: "{sha}"
+  key: "{sha}:{number}"
   mode: latest-wins
   cancel_running: false
 
