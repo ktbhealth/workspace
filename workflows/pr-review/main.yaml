@@ -507,12 +507,14 @@ nodes:
         default: "pr-review.agent.failed.${event.match.1}"
       timeout: 30
 
-  # --- cleanup: agent chain failed before/at the wire — release lock -
+  # --- cleanup: agent chain failed — release lock + drop worktree/session -
   # agent.failed.* covers prep-node failures (its trap already released
-  # — rmdir is idempotent), the sessions.run wire failure (ok:false —
-  # the gate never ran, lock still held), and gate failures (already
-  # released). agent.busy.* is deliberately NOT
-  # here: a busy lock belongs to the in-flight chain.
+  # the lock — rmdir is idempotent), the sessions.run wire failure
+  # (ok:false — the gate never ran, lock still held), and gate failures
+  # (already released). agent.busy.* is deliberately NOT
+  # here: a busy lock belongs to the in-flight chain. The worktree and
+  # session are disposable once the chain is terminal — same hygiene
+  # as the pushed path.
   - id: pr-review.cleanup.agentfail
     driver: shell
     on:
@@ -524,11 +526,14 @@ nodes:
       cmd: |
         set -uo pipefail
         SHA='${event.match.1}'
+        WT="${config.worktree_base}/${SHA}"
         rmdir "${config.worktree_base}/${SHA}.agent-lock" 2>/dev/null || true
+        lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
+        devin-gc --cwd "$WT" --apply || true
         echo "agentfail cleanup for ${SHA:0:12}"
       emit:
         "0": "pr-review.cleaned.${event.match.1}"
-      timeout: 30
+      timeout: 60
 
   # --- review: commit the agent's adjustments in the worktree ------------
   # Single lasius call → `driver: ops`. No --allow-empty (the flag stays
@@ -623,7 +628,7 @@ nodes:
         "0": "pr-review.cleaned.${event.match.1}"
       timeout: 60
 
-  # --- cleanup: gave up — worktree stays for human inspection -------------
+  # --- cleanup: gave up — drop worktree + session like every terminal ---
   - id: pr-review.cleanup.gaveup
     driver: shell
     on:
@@ -635,11 +640,41 @@ nodes:
       cmd: |
         set -uo pipefail
         SHA='${event.match.1}'
+        WT="${config.worktree_base}/${SHA}"
         rmdir "${config.worktree_base}/${SHA}.agent-lock" 2>/dev/null || true
-        echo "gaveup cleanup for ${SHA:0:12} (worktree kept for inspection)"
+        lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
+        devin-gc --cwd "$WT" --apply || true
+        echo "gaveup cleanup for ${SHA:0:12}"
       emit:
         "0": "pr-review.cleaned.${event.match.1}"
-      timeout: 30
+      timeout: 60
+
+  # --- cleanup: terminal paths bypassing pushed/gaveup/agentfail --------
+  # push.skipped = the PR merged or moved while the agent ran (the
+  # in-flight commit is moot); push.failed = commit/push errored;
+  # attempts.failed = the review ledger write failed after the worktree
+  # existed. All leave the worktree behind otherwise — same hygiene.
+  - id: pr-review.cleanup.pushfail
+    driver: shell
+    on:
+      - pr-review.push.failed.*
+      - pr-review.push.skipped.*
+      - pr-review.attempts.failed.*
+    emits:
+      - pr-review.cleaned.*
+    max_fires: unlimited
+    params:
+      cmd: |
+        set -uo pipefail
+        SHA='${event.match.1}'
+        WT="${config.worktree_base}/${SHA}"
+        rmdir "${config.worktree_base}/${SHA}.agent-lock" 2>/dev/null || true
+        lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
+        devin-gc --cwd "$WT" --apply || true
+        echo "pushfail cleanup for ${SHA:0:12} (${event.type})"
+      emit:
+        "0": "pr-review.cleaned.${event.match.1}"
+      timeout: 60
 
   # --- ci signal: check_run|check_suite|status → ci.signal.<sha> ---------
   # Repo gate + open-PR pre-filter — the merge node still re-derives

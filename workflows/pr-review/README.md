@@ -164,7 +164,9 @@ diff retriggers CI, and the merge gate only fires on the live head.
 - Run logs: `tamias logs pr-review` / campaign history JSONL under
   `~/.local/share/peregrin/serve-history/pr-review.jsonl`.
 - Worktrees: `<worktree_base>/<sha>` (full head sha) — removed
-  automatically after a successful push and on give-up; kept on failures for inspection
+  automatically on every terminal path (pushed, gaveup, agent/push
+  failure) along with the agent session (`devin-gc --cwd`); a dirty
+  worktree that `lasius` refuses to remove stays for inspection
   (`lasius --root <ws> vcs worktree remove <checkout> --dir <path>`
   to gc manually).
 - PR map: `<worktree_base>/prs/<sha>` holds `number`, head `ref`,
@@ -176,7 +178,6 @@ diff retriggers CI, and the merge gate only fires on the live head.
   (it also blocks merges for that sha until removed).
 - Sepia sessions: review sessions are ordinary sepia sessions —
   inspect with `sepia list` / the tamias-driver-sepia views; they are
-  NOT registered on the peregrin node. Successful runs delete the
-  session with the worktree (`devin-gc --cwd`); sessions for runs that
-  kept their worktree stay for inspection and are collectible later
-  with a plain `devin-gc`.
+  NOT registered on the peregrin node. Every terminal path deletes the
+  session with the worktree (`devin-gc --cwd`); a plain `devin-gc`
+  sweep collects anything left behind.
