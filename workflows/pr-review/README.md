@@ -165,12 +165,18 @@ diff retriggers CI, and the merge gate only fires on the live head.
   `~/.local/share/peregrin/serve-history/pr-review.jsonl`.
 - Worktrees: `<worktree_base>/<sha>` (full head sha) — removed
   automatically on every terminal path (pushed, gaveup, agent/push
-  failure) along with the agent session (`devin-gc --cwd`); a dirty
-  worktree that `lasius` refuses to remove stays for inspection
-  (`lasius --root <ws> vcs worktree remove <checkout> --dir <path>`
-  to gc manually). A session-delete failure emits
-  `pr-review.cleanup.failed.*` (reported as terminal) instead of
-  passing silently.
+  failure); a dirty worktree that `lasius` refuses to remove stays for
+  inspection (`lasius --root <ws> vcs worktree remove <checkout> --dir
+  <path>` to gc manually).
+- Sessions: the gate node records the session id at
+  `<worktree_base>/sessions/<sha>`. Success paths (`pushed.*`,
+  `push.skipped.*`) delete it immediately via `sepia delete`
+  (devin-gc cwd sweep as fallback); failure paths RETAIN it for 7 days
+  for debugging. Every cleanup appends to
+  `<worktree_base>/cleanup-ledger.jsonl` — the reconcile pass inside
+  `peregrin campaign serve` retries `failed` entries and expires
+  `retained` ones. A session-delete failure emits
+  `pr-review.cleanup.failed.*` (reported as terminal).
 - PR map: `<worktree_base>/prs/<sha>` holds `number`, head `ref`,
   `base_ref` for each signalled sha.
 - Attempt ledgers: `<worktree_base>/attempts/pr-<n>-reviews` — delete
@@ -180,7 +186,8 @@ diff retriggers CI, and the merge gate only fires on the live head.
   (it also blocks merges for that sha until removed).
 - Sepia sessions: review sessions are ordinary sepia sessions —
   inspect with `sepia list` / the tamias-driver-sepia views; they are
-  NOT registered on the peregrin node. Every terminal path deletes the
-  session with the worktree (`devin-gc --cwd`); a plain `devin-gc`
-  sweep collects anything left behind. Cleanup failures surface as
-  `pr-review.cleanup.failed.*` events in the run log.
+  NOT registered on the peregrin node. Session lifecycle: id recorded
+  at `<worktree_base>/sessions/<sha>`; deleted on success
+  (`sepia delete`), retained 7d on failure, expired by the serve
+  reconcile pass; `cleanup-ledger.jsonl` is the durable record.
+  Cleanup failures surface as `pr-review.cleanup.failed.*` events.
