@@ -521,6 +521,7 @@ nodes:
       - pr-review.agent.failed.*
     emits:
       - pr-review.cleaned.*
+      - pr-review.cleanup.failed.*
     max_fires: unlimited
     params:
       cmd: |
@@ -529,10 +530,15 @@ nodes:
         WT="${config.worktree_base}/${SHA}"
         rmdir "${config.worktree_base}/${SHA}.agent-lock" 2>/dev/null || true
         lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
-        devin-gc --cwd "$WT" --apply || true
-        echo "agentfail cleanup for ${SHA:0:12}"
+        if devin-gc --cwd "$WT" --apply; then
+          echo "agentfail cleanup for ${SHA:0:12}"
+          exit 0
+        fi
+        echo "session cleanup failed for ${SHA:0:12}" >&2
+        exit 4
       emit:
         "0": "pr-review.cleaned.${event.match.1}"
+        "4": "pr-review.cleanup.failed.${event.match.1}"
       timeout: 60
 
   # --- review: commit the agent's adjustments in the worktree ------------
@@ -611,6 +617,7 @@ nodes:
       - pr-review.pushed.*
     emits:
       - pr-review.cleaned.*
+      - pr-review.cleanup.failed.*
     max_fires: unlimited
     params:
       cmd: |
@@ -620,12 +627,18 @@ nodes:
         lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
         rmdir "${config.worktree_base}/${SHA}.agent-lock" 2>/dev/null || true
         # Session hygiene: the review session's cwd was the worktree —
-        # drop it with the worktree (best effort: devin-gc refuses open
-        # sessions, and a gc failure must not fail the cleanup emit).
-        devin-gc --cwd "$WT" --apply || true
-        echo "cleaned $WT"
+        # drop it with the worktree. A gc failure is reported as
+        # cleanup.failed.* (not silence) — devin-gc refuses open
+        # sessions, so a live session surfaces here honestly.
+        if devin-gc --cwd "$WT" --apply; then
+          echo "cleaned $WT"
+          exit 0
+        fi
+        echo "session cleanup failed for $WT" >&2
+        exit 4
       emit:
         "0": "pr-review.cleaned.${event.match.1}"
+        "4": "pr-review.cleanup.failed.${event.match.1}"
       timeout: 60
 
   # --- cleanup: gave up — drop worktree + session like every terminal ---
@@ -635,6 +648,7 @@ nodes:
       - pr-review.attempts.gaveup.*
     emits:
       - pr-review.cleaned.*
+      - pr-review.cleanup.failed.*
     max_fires: unlimited
     params:
       cmd: |
@@ -643,10 +657,15 @@ nodes:
         WT="${config.worktree_base}/${SHA}"
         rmdir "${config.worktree_base}/${SHA}.agent-lock" 2>/dev/null || true
         lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
-        devin-gc --cwd "$WT" --apply || true
-        echo "gaveup cleanup for ${SHA:0:12}"
+        if devin-gc --cwd "$WT" --apply; then
+          echo "gaveup cleanup for ${SHA:0:12}"
+          exit 0
+        fi
+        echo "session cleanup failed for ${SHA:0:12}" >&2
+        exit 4
       emit:
         "0": "pr-review.cleaned.${event.match.1}"
+        "4": "pr-review.cleanup.failed.${event.match.1}"
       timeout: 60
 
   # --- cleanup: terminal paths bypassing pushed/gaveup/agentfail --------
@@ -662,6 +681,7 @@ nodes:
       - pr-review.attempts.failed.*
     emits:
       - pr-review.cleaned.*
+      - pr-review.cleanup.failed.*
     max_fires: unlimited
     params:
       cmd: |
@@ -670,10 +690,15 @@ nodes:
         WT="${config.worktree_base}/${SHA}"
         rmdir "${config.worktree_base}/${SHA}.agent-lock" 2>/dev/null || true
         lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
-        devin-gc --cwd "$WT" --apply || true
-        echo "pushfail cleanup for ${SHA:0:12} (${event.type})"
+        if devin-gc --cwd "$WT" --apply; then
+          echo "pushfail cleanup for ${SHA:0:12} (${event.type})"
+          exit 0
+        fi
+        echo "session cleanup failed for ${SHA:0:12} (${event.type})" >&2
+        exit 4
       emit:
         "0": "pr-review.cleaned.${event.match.1}"
+        "4": "pr-review.cleanup.failed.${event.match.1}"
       timeout: 60
 
   # --- ci signal: check_run|check_suite|status → ci.signal.<sha> ---------
@@ -814,6 +839,7 @@ nodes:
       - pr-review.push.skipped.*
       - pr-review.push.failed.*
       - pr-review.cleaned.*
+      - pr-review.cleanup.failed.*
       - pr-review.ci.ignored
       - pr-review.merged.*
       - pr-review.merge.skipped.*

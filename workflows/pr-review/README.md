@@ -168,7 +168,9 @@ diff retriggers CI, and the merge gate only fires on the live head.
   failure) along with the agent session (`devin-gc --cwd`); a dirty
   worktree that `lasius` refuses to remove stays for inspection
   (`lasius --root <ws> vcs worktree remove <checkout> --dir <path>`
-  to gc manually).
+  to gc manually). A session-delete failure emits
+  `pr-review.cleanup.failed.*` (reported as terminal) instead of
+  passing silently.
 - PR map: `<worktree_base>/prs/<sha>` holds `number`, head `ref`,
   `base_ref` for each signalled sha.
 - Attempt ledgers: `<worktree_base>/attempts/pr-<n>-reviews` — delete
@@ -180,4 +182,5 @@ diff retriggers CI, and the merge gate only fires on the live head.
   inspect with `sepia list` / the tamias-driver-sepia views; they are
   NOT registered on the peregrin node. Every terminal path deletes the
   session with the worktree (`devin-gc --cwd`); a plain `devin-gc`
-  sweep collects anything left behind.
+  sweep collects anything left behind. Cleanup failures surface as
+  `pr-review.cleanup.failed.*` events in the run log.
