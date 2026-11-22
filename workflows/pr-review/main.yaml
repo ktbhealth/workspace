@@ -614,6 +614,10 @@ nodes:
         WT="${config.worktree_base}/${SHA}"
         lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
         rmdir "${config.worktree_base}/${SHA}.agent-lock" 2>/dev/null || true
+        # Session hygiene: the review session's cwd was the worktree —
+        # drop it with the worktree (best effort: devin-gc refuses open
+        # sessions, and a gc failure must not fail the cleanup emit).
+        devin-gc --cwd "$WT" --apply || true
         echo "cleaned $WT"
       emit:
         "0": "pr-review.cleaned.${event.match.1}"

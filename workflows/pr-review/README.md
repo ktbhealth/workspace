@@ -176,4 +176,7 @@ diff retriggers CI, and the merge gate only fires on the live head.
   (it also blocks merges for that sha until removed).
 - Sepia sessions: review sessions are ordinary sepia sessions —
   inspect with `sepia list` / the tamias-driver-sepia views; they are
-  NOT registered on the peregrin node.
+  NOT registered on the peregrin node. Successful runs delete the
+  session with the worktree (`devin-gc --cwd`); sessions for runs that
+  kept their worktree stay for inspection and are collectible later
+  with a plain `devin-gc`.
