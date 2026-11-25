@@ -107,7 +107,7 @@ config:
   # "smart" is the safer middle ground.
   agent_mode: "bypass"
   # Per-PR cap on agent review attempts — counted in
-  # <worktree_base>/attempts/pr-<n>-reviews, survives restarts.
+  # <worktree_base>/attempts/pr-<repo>-<n>-reviews, survives restarts.
   max_review_attempts: 2
   # Verification command the agent must leave passing — the prompt
   # embeds it verbatim; it is NOT executed by the campaign (the agent
@@ -358,7 +358,7 @@ nodes:
 
   # --- review: per-PR attempt ledger --------------------------------------
   # Counts review attempts per PR number in
-  # <worktree_base>/attempts/pr-<n>-reviews — durable across campaign
+  # <worktree_base>/attempts/pr-<repo>-<n>-reviews — durable across campaign
   # restarts and scoped per PR. Over cap → gaveup.<sha>, reported
   # terminally; the PR is left for a human (CI still gates the merge).
   - id: pr-review.attempts
@@ -381,7 +381,11 @@ nodes:
         fi
         NUMBER=$(sed -n '1p' "$MAP")
         DIR="${config.worktree_base}/attempts"
-        FILE="$DIR/pr-$NUMBER-reviews"
+        # worktree_base is shared across every per-repo deployment of
+        # this bundle — key the ledger by repo+PR number or same-numbered
+        # PRs in different repos would share one review budget.
+        SAFE_REPO=$(printf '%s' "${config.repo}" | tr '/:' '__')
+        FILE="$DIR/pr-${SAFE_REPO}-$NUMBER-reviews"
         mkdir -p "$DIR"
         COUNT=$(( $(cat "$FILE" 2>/dev/null || echo 0) + 1 ))
         echo "$COUNT" > "$FILE"

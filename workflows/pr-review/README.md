@@ -123,8 +123,9 @@ No raw `git`/`gh`/`devin` anywhere in `main.yaml`.
   merge node checks `is_draft` on the `pr list` rollup. Publishing a
   draft fires `ready_for_review` (subscribed in
   `pull_request_actions`) which re-enters the review chain.
-- **Per-PR review ledger** — `<worktree_base>/attempts/pr-<n>-reviews`
-  counts agent runs per PR (default cap 2); over-cap emits
+- **Per-PR review ledger** — `<worktree_base>/attempts/pr-<repo>-<n>-reviews`
+  counts agent runs per PR (default cap 2; repo-qualified because
+  `worktree_base` is shared across per-repo deployments); over-cap emits
   `attempts.gaveup` and leaves the PR for a human. The merge path is
   unaffected — CI green still merges.
 - **Per-sha agent lock** — duplicate `pull_request` deliveries for one
@@ -185,7 +186,7 @@ diff retriggers CI, and the merge gate only fires on the live head.
   `pr-review.cleanup.failed.*` (reported as terminal).
 - PR map: `<worktree_base>/prs/<sha>` holds `number`, head `ref`,
   `base_ref` for each signalled sha.
-- Attempt ledgers: `<worktree_base>/attempts/pr-<n>-reviews` — delete
+- Attempt ledgers: `<worktree_base>/attempts/pr-<repo>-<n>-reviews` — delete
   the file to reset that PR's review budget.
 - Agent locks: `<worktree_base>/<sha>.agent-lock` — stale locks are
   removed by cleanup nodes; delete manually if a run died mid-flight
