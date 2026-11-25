@@ -57,6 +57,16 @@
       "type": "string",
       "description": "Comma-separated GitHub logins allowed to reach the agent and auto-merge — checked against the PR AUTHOR in the review guard and merge node. Empty = deny all (fail closed).",
       "default": ""
+    },
+    "trusted_team": {
+      "type": "string",
+      "description": "GitHub org team slug whose ACTIVE members count as trusted authors — checked in the review guard and merge node. Empty = static trusted_actors list only.",
+      "default": ""
+    },
+    "trusted_org": {
+      "type": "string",
+      "description": "GitHub org owning trusted_team.",
+      "default": ""
     }
   },
   "additionalProperties": true

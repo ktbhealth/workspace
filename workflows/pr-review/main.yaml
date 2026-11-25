@@ -119,9 +119,15 @@ config:
   # older drivers) in BOTH the review guard and the merge node. A PR
   # by anyone else is skipped entirely: no agent run, no merge, no
   # matter how green its checks are. Empty = deny all (fail closed).
-  # Default = current ktbhealth org members; extend per deployment
-  # via deploy.d config overrides when the roster changes.
+  # Break-glass extra allowlist on top of the team check; managed via
+  # deploy.d config overrides when the roster changes.
   trusted_actors: "eccarneiro,luisfuturist,vinicenter"
+  # Org team whose ACTIVE members are trusted authors — checked live
+  # via the teams API (GITHUB_TOKEN secret) in the guard and merge
+  # nodes. Codified in infra/github (Pulumi). Empty team = static
+  # list only.
+  trusted_team: "trusted-contributors"
+  trusted_org: "ktbhealth"
   # lasius workspace root (--root) — repo args are checkout paths, so
   # any lasius.toml workspace works; the ktbhealth workspace is the
   # natural choice.
@@ -223,6 +229,8 @@ nodes:
       - pr-review.worktree.failed.*
     max_fires: unlimited
     params:
+      env:
+        GH_TOKEN: "${secret.GITHUB_TOKEN}"
       cmd: |
         set -euo pipefail
         [ "${event.payload.repo}" = "${config.repo}" ] || { echo "ignore: repo='${event.payload.repo}'"; exit 2; }
@@ -235,10 +243,17 @@ nodes:
         # untrusted PR never reaches the agent, the push, or the merge.
         AUTHOR='${event.payload.author:-${event.payload.actor}}'
         [ -n "$AUTHOR" ] || { echo "skip: PR #${event.payload.number} has no author identity"; exit 4; }
+        TRUSTED=0
         case ",${config.trusted_actors}," in
-          *",${AUTHOR},"*) ;;
-          *) echo "skip: PR #${event.payload.number} author '${AUTHOR:-<none>}' not in trusted_actors"; exit 4 ;;
+          *",${AUTHOR},"*) TRUSTED=1 ;;
         esac
+        if [ "$TRUSTED" = 0 ] && [ -n "${config.trusted_team:-}" ]; then
+          STATE=$(curl -sf --max-time 15 -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/orgs/${config.trusted_org}/teams/${config.trusted_team}/memberships/${AUTHOR}" \
+            | jq -r '.state // empty' 2>/dev/null || true)
+          [ "$STATE" = "active" ] && TRUSTED=1
+        fi
+        [ "$TRUSTED" = 1 ] || { echo "skip: PR #${event.payload.number} author '${AUTHOR}' not trusted"; exit 4; }
         SHA='${event.payload.sha}'
         mkdir -p "${config.worktree_base}/prs"
         printf '%s\n%s\n%s\n' "${event.payload.number}" "${event.payload.ref}" "${event.payload.base_ref}" \
@@ -876,10 +891,17 @@ nodes:
         # the PR author login (null → empty → denied).
         AUTHOR=$(printf '%s' "$JSON" | jq -r --arg sha "$SHA" '[.[] | select(.head_sha == $sha)] | .[0].author // empty')
         [ -n "$AUTHOR" ] || { echo "skip: PR #$NUMBER has no author identity"; exit 3; }
+        TRUSTED=0
         case ",${config.trusted_actors}," in
-          *",${AUTHOR},"*) ;;
-          *) echo "skip: PR #$NUMBER author '$AUTHOR' not in trusted_actors"; exit 3 ;;
+          *",${AUTHOR},"*) TRUSTED=1 ;;
         esac
+        if [ "$TRUSTED" = 0 ] && [ -n "${config.trusted_team:-}" ]; then
+          STATE=$(curl -sf --max-time 15 -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/orgs/${config.trusted_org}/teams/${config.trusted_team}/memberships/${AUTHOR}" \
+            | jq -r '.state // empty' 2>/dev/null || true)
+          [ "$STATE" = "active" ] && TRUSTED=1
+        fi
+        [ "$TRUSTED" = 1 ] || { echo "skip: PR #$NUMBER author '$AUTHOR' not trusted"; exit 3; }
         CHECKS=$(lasius --root "${config.lasius_root}" forge pr checks "${config.checkout}" "$NUMBER" --json) || exit 1
         READY=$(printf '%s' "$CHECKS" | jq -r '
           if length == 0 then "empty"
