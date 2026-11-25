@@ -52,6 +52,11 @@
       "type": "string",
       "description": "lasius workspace root (--root flag); repo args are checkout paths so any lasius.toml workspace works.",
       "default": "/home/luis/GitHub/ktbhealth"
+    },
+    "trusted_actors": {
+      "type": "string",
+      "description": "Comma-separated GitHub logins allowed to reach the agent and auto-merge — checked against the PR AUTHOR in the review guard and merge node. Empty = deny all (fail closed).",
+      "default": ""
     }
   },
   "additionalProperties": true
