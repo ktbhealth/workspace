@@ -2,6 +2,7 @@ import * as pulumi from "@pulumi/pulumi";
 import * as github from "@pulumi/github";
 import { REPOS } from "./repos.ts";
 import { registerRulesets } from "./rulesets.ts";
+import { registerTeams } from "./teams.ts";
 
 /**
  * Pulumi program for ktbhealth org GitHub policies (myco T-054).
@@ -54,6 +55,7 @@ for (const repo of REPOS) {
 
 const manageOrgWebhook = config.getBoolean("manageOrgWebhook") ?? true;
 registerRulesets({ protect: true });
+registerTeams();
 if (manageOrgWebhook) {
   new github.OrganizationWebhook("org-webhook-ci", {
     active: true,
