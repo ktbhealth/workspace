@@ -10,7 +10,8 @@
 # checks`, NOT bupha's ci.job.completed channel.
 #
 # Flow:
-#   pull_request (opened|synchronize|reopened) ──► worktree@head-sha
+#   pull_request (opened|synchronize|reopened|ready_for_review) ──►
+#   worktree@head-sha
 #     (detached; PR number/ref/base persisted per sha) ──► per-PR
 #     review-attempt ledger ──► sepia run (review diff vs base, apply
 #     needed adjustments, leave uncommitted) ──► commit + push
@@ -197,8 +198,11 @@ nodes:
         - name: "${config.repo}"
           secret_env: "${config.webhook_secret_env}"
       # PR lifecycle we review: new heads and updates; closed/merged
-      # would spawn agents on dead refs.
-      pull_request_actions: [opened, synchronize, reopened]
+      # would spawn agents on dead refs. `ready_for_review` is the
+      # draft→ready flip — the ONLY action that reviews a formerly-draft
+      # PR (opened/synchronize on a draft are skipped by the guard's
+      # live is_draft check; the webhook payload carries no draft bit).
+      pull_request_actions: [opened, synchronize, reopened, ready_for_review]
       # Only terminal check deliveries carry a verdict.
       check_run_actions: [completed]
       check_suite_actions: [completed]
@@ -236,6 +240,21 @@ nodes:
         [ "${event.payload.repo}" = "${config.repo}" ] || { echo "ignore: repo='${event.payload.repo}'"; exit 2; }
         if [ "${event.payload.fork}" = "true" ]; then
           echo "skip: PR #${event.payload.number} head is a fork — local clone cannot fetch it"
+          exit 3
+        fi
+        # Draft gate — the normalized pull_request payload carries no
+        # draft bit (the driver's PullRequest struct has no such field),
+        # so draft state is re-derived live via forge. Drafts are never
+        # reviewed; `ready_for_review` re-enters here with is_draft=false.
+        # Fail CLOSED: a forge error skips the review — the next
+        # pull_request/check delivery or a manual re-run recovers it.
+        PRJSON=$(lasius --root "${config.lasius_root}" forge pr view "${config.checkout}" "${event.payload.number}" --json 2>/dev/null) || {
+          echo "skip: PR #${event.payload.number} draft check failed (forge pr view)"
+          exit 3
+        }
+        IS_DRAFT=$(printf '%s' "$PRJSON" | jq -r '.is_draft // true' 2>/dev/null || echo true)
+        if [ "$IS_DRAFT" = "true" ]; then
+          echo "skip: PR #${event.payload.number} is a draft — reviews start at ready_for_review"
           exit 3
         fi
         # Trusted-author gate — `author` is the PR author (the code's
@@ -883,6 +902,15 @@ nodes:
         NUMBER=$(printf '%s' "$JSON" | jq -r --arg sha "$SHA" '[.[] | select(.head_sha == $sha)] | .[0].number // empty')
         if [ -z "$NUMBER" ]; then
           echo "skip: no open PR with head_sha=$SHA"
+          exit 3
+        fi
+        # Draft gate — GitHub refuses draft merges anyway, but skip
+        # explicitly so a draft's green checks don't burn merge.failed
+        # runs; `ready_for_review` re-enters the review chain and the
+        # next check delivery re-evaluates here.
+        IS_DRAFT=$(printf '%s' "$JSON" | jq -r --arg sha "$SHA" '[.[] | select(.head_sha == $sha)] | .[0].is_draft // true')
+        if [ "$IS_DRAFT" = "true" ]; then
+          echo "skip: PR #$NUMBER is a draft — merge waits for ready_for_review"
           exit 3
         fi
         # Trusted-author gate — fork PRs skip the agent but their GHA

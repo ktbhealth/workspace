@@ -117,6 +117,12 @@ No raw `git`/`gh`/`devin` anywhere in `main.yaml`.
   held, the merge node waits: the head is about to move.
 - **Fork PRs skipped** — the local clone can't fetch fork objects
   through lasius; fork deliveries emit `worktree.skipped`.
+- **Draft PRs skipped** — drafts are never reviewed and never merged.
+  The webhook payload carries no draft bit, so the guard re-derives
+  `is_draft` live via `lasius forge pr view` (fail-closed) and the
+  merge node checks `is_draft` on the `pr list` rollup. Publishing a
+  draft fires `ready_for_review` (subscribed in
+  `pull_request_actions`) which re-enters the review chain.
 - **Per-PR review ledger** — `<worktree_base>/attempts/pr-<n>-reviews`
   counts agent runs per PR (default cap 2); over-cap emits
   `attempts.gaveup` and leaves the PR for a human. The merge path is
