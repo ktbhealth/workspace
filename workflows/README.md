@@ -3,9 +3,9 @@
 Peregrin campaign bundles for ktbhealth repos — event-driven
 automation (agent sessions, CI gates, forge ops) installed via tamias.
 
-| bundle                     | what it does                                                                             |
-| -------------------------- | ---------------------------------------------------------------------------------------- |
-| [`pr-review/`](pr-review/) | PR opened/updated → sepia agent reviews + adjusts → verified-green checks → squash merge |
+| bundle                     | what it does                                                                                 |
+| -------------------------- | -------------------------------------------------------------------------------------------- |
+| [`pr-review/`](pr-review/) | PR opened/updated → sepia agent reviews + adjusts → verified-green checks → squash merge     |
 | [`deploy/`](deploy/)       | push to deploy ref → worktree deploy → cooldown throttle (one deploy per service per window) |
 
 ## Bundle anatomy

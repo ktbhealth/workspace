@@ -20,7 +20,7 @@ push (refs/heads/<deploy_ref>)
 
 **Throttle, not debounce.** The deploy fires immediately on push;
 the run then parks in `cooldown` for `cooldown_secs` (default 900 =
-15 min). Pushes arriving while a run is active — deploying *or*
+15 min). Pushes arriving while a run is active — deploying _or_
 cooling down — queue behind it, and `supersede` `latest-wins`
 collapses every pending trigger for the repo to the newest push.
 Net effect: **at most one deploy per service per cooldown window**,
@@ -78,17 +78,17 @@ One bundle install, N serve files — same pattern as `pr-review`.
    `~/.config/peregrin/serve/deploy.yaml`; copy it per service as
    `deploy-<service>.yaml` and set the per-deployment values:
 
-   | key               | required | meaning                                             |
-   | ----------------- | -------- | --------------------------------------------------- |
-   | `repo`            | yes      | `owner/name` watched repo                           |
-   | `webhook_secret_env` | yes   | env var name holding the HMAC                       |
-   | `checkout`        | yes      | local clone path (`repos/<name>`)                   |
-   | `deploy_cmd`      | yes      | command run at the worktree root                    |
-   | `deploy_ref`      | no       | trigger ref (default `refs/heads/main`)             |
-   | `install_cmd`     | no       | pre-deploy install (default bun frozen-lockfile)    |
-   | `cooldown_secs`   | no       | throttle window (default 900; < 3660 node timeout)  |
-   | `status_context`  | no       | commit-status context, e.g. `deploy/product`        |
-   | `worktree_base`, `lasius_root` | no | paths (absolute — no `$HOME` expansion in params) |
+   | key                            | required | meaning                                                         |
+   | ------------------------------ | -------- | --------------------------------------------------------------- |
+   | `repo`                         | yes      | `owner/name` watched repo                                       |
+   | `webhook_secret_env`           | yes      | env var name holding the HMAC                                   |
+   | `checkout`                     | yes      | local clone path (`repos/<name>`)                               |
+   | `deploy_cmd`                   | yes      | command run at the worktree root                                |
+   | `deploy_ref`                   | no       | trigger ref (default `refs/heads/main`)                         |
+   | `install_cmd`                  | no       | pre-deploy install (default bun frozen-lockfile)                |
+   | `cooldown_secs`                | no       | throttle window (default 900; < 3660 node timeout)              |
+   | `status_context`               | no       | commit-status context, e.g. `deploy/product`                    |
+   | `worktree_base`, `lasius_root` | no       | paths (`~`, `$HOME`, or absolute — expanded in the shell nodes) |
 
    If the webhook secret env var isn't in `~/.config/peregrin/env`,
    add its name under `capabilities.secrets` there too. Then
@@ -105,12 +105,12 @@ One bundle install, N serve files — same pattern as `pr-review`.
 
 ### ktbhealth services
 
-| serve file              | repo                  | deploy_cmd                          | status_context    |
-| ----------------------- | --------------------- | ----------------------------------- | ----------------- |
-| `deploy-product.yaml`   | `ktbhealth/product`   | `bun run build && bun run deploy`   | `deploy/product`  |
-| `deploy-docs.yaml`      | `ktbhealth/docs`      | `bun run deploy` (self-builds)      | `deploy/docs`     |
-| `deploy-website.yaml`   | `ktbhealth/website-draft` | `bun run build && bun run deploy` | `deploy/website`  |
-| `deploy-storybook.yaml` | `ktbhealth/storybook` | `bun run build && bun run deploy`   | `deploy/storybook`|
+| serve file              | repo                      | deploy_cmd                        | status_context     |
+| ----------------------- | ------------------------- | --------------------------------- | ------------------ |
+| `deploy-product.yaml`   | `ktbhealth/product`       | `bun run build && bun run deploy` | `deploy/product`   |
+| `deploy-docs.yaml`      | `ktbhealth/docs`          | `bun run deploy` (self-builds)    | `deploy/docs`      |
+| `deploy-website.yaml`   | `ktbhealth/website-draft` | `bun run build && bun run deploy` | `deploy/website`   |
+| `deploy-storybook.yaml` | `ktbhealth/storybook`     | `bun run build && bun run deploy` | `deploy/storybook` |
 
 Repos without a deploy path (`ui`, `slidev-theme-ktb`,
 `presentation-draft`, `project`) get no deployment.
@@ -121,7 +121,7 @@ Repos without a deploy path (`ui`, `slidev-theme-ktb`,
   `after` sha; superseded pending triggers never run, so the deployed
   sha is always the newest push seen.
 - **Never kills in-flight work** — `cancel_running: false`; deploys
-  and cooldowns run to completion. Only *pending* triggers are
+  and cooldowns run to completion. Only _pending_ triggers are
   replaced (latest-wins).
 - **Worktree isolation** — deploys run in a detached lasius worktree
   under `worktree_base`, never in the operator's checkouts; the dir

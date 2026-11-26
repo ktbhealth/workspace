@@ -150,9 +150,9 @@ nodes:
         [ "${event.payload.ref}" = "${config.deploy_ref}" ] || { echo "ignore: ref='${event.payload.ref}'"; exit 3; }
         SHA='${event.payload.sha}'
         if [ -n "${config.status_context}" ]; then
-          ROOT='${config.lasius_root}'
+          ROOT="${config.lasius_root}"
           ROOT="$(printf '%s' "$ROOT" | sed "s|^~|$HOME|")"
-          lasius --root "$ROOT" forge status create '${config.checkout}' \
+          lasius --root "$ROOT" forge status create "${config.checkout}" \
             --sha "$SHA" --state pending \
             --context "${config.status_context}" \
             --description "deploy queued (${event.payload.actor:-unknown})" \
@@ -201,9 +201,13 @@ nodes:
         SHA='${event.match.1}'
         case "$SHA" in ''|*[!0-9a-fA-F]*) echo "bad sha '$SHA'"; exit 1 ;; esac
         expand_tilde() { printf '%s' "$1" | sed "s|^~|$HOME|"; }
-        ROOT=$(expand_tilde '${config.lasius_root}')
-        BASE=$(expand_tilde '${config.worktree_base}')
-        CHECKOUT=$(expand_tilde '${config.checkout}')
+        # Double quotes (not single) so a literal $HOME in a config
+        # value — worktree_base's default spells it that way — is
+        # expanded by the shell before expand_tilde sees the path;
+        # expand_tilde then covers the ~/… spelling.
+        ROOT=$(expand_tilde "${config.lasius_root}")
+        BASE=$(expand_tilde "${config.worktree_base}")
+        CHECKOUT=$(expand_tilde "${config.checkout}")
         SAFE_REPO=$(printf '%s' "${config.repo}" | tr '/:' '__')
         RUN="$BASE/deploy-${SAFE_REPO}-${SHA}"
         post_status() {
@@ -218,6 +222,10 @@ nodes:
             --json >/dev/null 2>&1 || true
         }
         trap cleanup EXIT
+        # deploy_cmd is REQUIRED per deployment — left empty the
+        # subshell below would succeed vacuously and post a false
+        # "deploy finished" verdict.
+        [ -n "${config.deploy_cmd}" ] || { post_status failure "deploy_cmd not configured"; echo "deploy_cmd empty"; exit 1; }
         mkdir -p "$BASE"
         # Clone-if-missing — `lasius add` is a no-op when the clone
         # exists (needs GH_TOKEN for `gh repo list`, injected above).
