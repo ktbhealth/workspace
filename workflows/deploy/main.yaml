@@ -149,6 +149,9 @@ nodes:
         [ "${event.payload.repo}" = "${config.repo}" ] || { echo "ignore: repo='${event.payload.repo}'"; exit 2; }
         [ "${event.payload.ref}" = "${config.deploy_ref}" ] || { echo "ignore: ref='${event.payload.ref}'"; exit 3; }
         SHA='${event.payload.sha}'
+        # Branch-delete pushes carry after = 40 zeros — no commit to
+        # deploy or status. Drop before the pending post.
+        [ "$SHA" != "0000000000000000000000000000000000000000" ] || { echo "ignore: ${config.deploy_ref} deleted"; exit 3; }
         if [ -n "${config.status_context}" ]; then
           ROOT="${config.lasius_root}"
           ROOT="$(printf '%s' "$ROOT" | sed "s|^~|$HOME|")"
