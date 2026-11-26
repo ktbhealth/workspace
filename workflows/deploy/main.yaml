@@ -1,0 +1,276 @@
+# deploy — push to a watched repo's deploy ref → detached worktree at
+# the pushed sha → bun install + the service's deploy command →
+# cooldown. Continuous deployment as a peregrin campaign.
+#
+# ktbhealth counterpart of 9aia's docs-deploy bundle, generalized:
+# instead of a fixed docs-branch → gh-pages pipeline, each deployment
+# configures its own repo + deploy command (Cloudflare Workers via
+# alchemy for product/docs/website-draft/storybook).
+#
+# Flow:
+#   push (refs/heads/<deploy_ref>) ──► route (repo/ref gate + pending
+#   commit status) ──► run: lasius fetch → worktree add @sha →
+#   install_cmd → deploy_cmd → verdict commit status → worktree
+#   cleanup ──► done|failed.<sha> ──► cooldown: sleep
+#   config.cooldown_secs ──► idle.<sha> (run ends)
+#
+# THROTTLE, not debounce: the deploy fires immediately on push, then
+# the run parks in `cooldown` for cooldown_secs. Pushes arriving while
+# a run is active (deploying OR cooling down) queue behind it —
+# `supersede` latest-wins keeps only the NEWEST pending trigger per
+# repo, so a burst of merges collapses to one deploy of the latest
+# sha. `cancel_running: false` deliberately: an in-flight deploy is
+# never killed (alchemy deploys are idempotent; a cancelled deploy
+# could leave half-applied infra), and the cooldown is never cut
+# short. Net effect: at most one deploy per service per
+# cooldown_secs window, measured from the previous deploy's start.
+#
+# Data flow: the sha rides the emitted event TYPE
+# (`deploy.pending.<sha>` → `${event.match.1}` downstream) — same
+# convention as pr-review/docs-deploy: the engine has no
+# stdout→state channel, so anything needing per-sha state stays in
+# the type or on disk under worktree_base.
+#
+# `driver: shell` everywhere except ingress: every node is composite
+# (guard + status post, worktree + install + deploy + cleanup, the
+# cooldown sleep) — per the bundle boundary rules git/forge goes
+# through `lasius`, never raw git/gh.
+name: deploy
+
+# Operator-facing knobs (see params.schema.json + README.md). The
+# deployment-specific values — `repo`, `webhook_secret_env`,
+# `checkout`, `deploy_cmd` — MUST be set per service before install.
+config:
+  # Watched repo as owner/name — drives the webhook repo filter and
+  # the route node's defensive re-check. REQUIRED per deployment.
+  repo: ""
+  # Env var holding this repo's webhook HMAC secret — the
+  # BUPHA_WH_<OWNER>_<REPO> convention (uppercased, - → _). REQUIRED.
+  webhook_secret_env: ""
+  # Local clone lasius operates on (any checkout path under the
+  # lasius workspace). REQUIRED per deployment.
+  checkout: ""
+  # Full git ref whose pushes trigger a deploy — also handed to the
+  # webhook driver's `push_refs` filter. Deploys fire on merges to
+  # the default branch; PR-branch pushes never reach the campaign.
+  deploy_ref: "refs/heads/main"
+  # Deploy worktrees land here, one dir per sha
+  # (`deploy-<repo>-<sha>`), removed by trap on every exit path.
+  worktree_base: "$HOME/.local/share/deploy/worktrees"
+  # Dependency install run at the worktree root before deploy_cmd —
+  # a fresh worktree has no node_modules. bun's global cache makes
+  # this fast; the frozen-lockfile-first fallback mirrors
+  # docs-deploy.
+  install_cmd: "bun install --frozen-lockfile 2>/dev/null || bun install"
+  # The deploy itself, run at the worktree root. REQUIRED per
+  # deployment — e.g. `bun run build && bun run deploy` for the
+  # alchemy services, `bun run deploy` where the script self-builds.
+  deploy_cmd: ""
+  # Minimum seconds between deploy starts per service — the run
+  # sleeps this long AFTER the deploy+status settle, so the next
+  # queued push deploys only once the window has passed. Must stay
+  # under the cooldown node's 3660s timeout.
+  cooldown_secs: 900
+  # Commit-status context posted on each deployed sha (pending →
+  # success/failure), e.g. "deploy/product". Empty disables status
+  # posts entirely (the guard in each node skips the forge call).
+  status_context: ""
+  # lasius workspace root (--root) — repo args are checkout paths,
+  # so any lasius.toml workspace works; the ktbhealth workspace is
+  # the natural choice.
+  lasius_root: "/home/luis/GitHub/ktbhealth"
+
+# Secret NAMES only — values live in ~/.config/peregrin/env (or
+# cuora). The webhook HMAC env var named by
+# config.webhook_secret_env must be declared; GITHUB_TOKEN feeds
+# `lasius forge status create` (gh api underneath) in the shell
+# nodes. Deploy auth itself needs NO injected secrets: `cuora run`
+# resolves through the host's tardigrada identity (~/.config/cuora,
+# HOME is in the child env allowlist) and alchemy through its local
+# profile — both verified working under the sanitized campaign env.
+capabilities:
+  secrets:
+    - BUPHA_WH_*
+    - GITHUB_TOKEN
+
+# Queue policy: one deploy pipeline per service. `latest-wins`
+# collapses every pending trigger for the repo to the newest push —
+# intermediate shas never deploy. `cancel_running: false` is the
+# throttle: the active run (deploy + cooldown) always runs to
+# completion; only its queue position is inherited by the next
+# trigger. Keyed on {repo} so the policy is explicit per watched
+# repo (each deployment watches exactly one anyway).
+supersede:
+  key: "{repo}"
+  mode: latest-wins
+  cancel_running: false
+
+nodes:
+  # --- ingress: verified push deliveries for the watched repo ---------
+  # `push_refs` restricts to the deploy ref at the driver — PR
+  # branches, tags and other refs never become events. Under
+  # `campaign serve` the shared listener demuxes by repo; listen/path
+  # are ignored there (they matter for a solo `campaign run`).
+  - id: deploy.ingress.webhook
+    driver: github-webhook
+    on:
+      - start
+    emits:
+      - deploy.ingress.webhook.listening
+      - push
+    params:
+      listen: 127.0.0.1:29175
+      path: /hook
+      repos:
+        - name: "${config.repo}"
+          secret_env: "${config.webhook_secret_env}"
+      push_refs: "${config.deploy_ref}"
+
+  # --- route: repo/ref gate + pending commit status --------------------
+  # The driver already filtered repo (repos:) and ref (push_refs:),
+  # so this node is the defensive re-check plus the "deploy queued"
+  # status post. Status posting is best-effort — a forge hiccup must
+  # never block a deploy.
+  - id: deploy.route
+    driver: shell
+    on:
+      - push
+    emits:
+      - deploy.pending.*
+      - deploy.ignored
+      - deploy.route.failed.*
+    max_fires: unlimited
+    params:
+      env:
+        GH_TOKEN: "${secret.GITHUB_TOKEN}"
+      timeout: 120
+      cmd: |
+        set -euo pipefail
+        [ "${event.payload.repo}" = "${config.repo}" ] || { echo "ignore: repo='${event.payload.repo}'"; exit 2; }
+        [ "${event.payload.ref}" = "${config.deploy_ref}" ] || { echo "ignore: ref='${event.payload.ref}'"; exit 3; }
+        SHA='${event.payload.sha}'
+        if [ -n "${config.status_context}" ]; then
+          ROOT='${config.lasius_root}'
+          ROOT="$(printf '%s' "$ROOT" | sed "s|^~|$HOME|")"
+          lasius --root "$ROOT" forge status create '${config.checkout}' \
+            --sha "$SHA" --state pending \
+            --context "${config.status_context}" \
+            --description "deploy queued (${event.payload.actor:-unknown})" \
+            --json >/dev/null 2>&1 || echo "warn: pending status post failed (non-fatal)"
+        fi
+        echo "deploy queued: ${config.repo} ${event.payload.ref} @ ${SHA:0:12} by ${event.payload.actor:-unknown}"
+      emit:
+        "0": "deploy.pending.${event.payload.sha}"
+        "2": "deploy.ignored"
+        "3": "deploy.ignored"
+        default: "deploy.route.failed.${event.payload.sha}"
+
+  # --- run: worktree at sha → install → deploy → verdict → cleanup -----
+  # One shell node owns the whole deploy because it is composite:
+  # fetch + stale-dir prune + worktree add + install_cmd +
+  # deploy_cmd + verdict status + trap cleanup. The verdict status is
+  # posted HERE (not a downstream node) so it lands the moment the
+  # deploy settles — a separate status node would queue behind the
+  # cooldown sleep and report 15min late.
+  #
+  # rc discipline: `set -uo pipefail` (no -e) so the deploy subshell's
+  # rc is captured explicitly; every setup failure exits 1 after
+  # posting a failure verdict. Emit "0" → done.<sha>, anything else →
+  # failed.<sha> — both feed the cooldown node, so failed deploys
+  # throttle retries too.
+  - id: deploy.run
+    driver: shell
+    on:
+      - deploy.pending.*
+    emits:
+      - deploy.done.*
+      - deploy.failed.*
+    max_fires: unlimited
+    params:
+      env:
+        GH_TOKEN: "${secret.GITHUB_TOKEN}"
+      # Covers bun install + build + alchemy deploy on the largest
+      # service (product monorepo). Node-level timeout is literal —
+      # config templating does not reach node fields.
+      timeout: 2400
+      cmd: |
+        set -uo pipefail
+        # bun/cuora/lasius live under ~/.bun/bin and ~/.local/bin —
+        # the service env's PATH may not carry them.
+        export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"
+        SHA='${event.match.1}'
+        case "$SHA" in ''|*[!0-9a-fA-F]*) echo "bad sha '$SHA'"; exit 1 ;; esac
+        expand_tilde() { printf '%s' "$1" | sed "s|^~|$HOME|"; }
+        ROOT=$(expand_tilde '${config.lasius_root}')
+        BASE=$(expand_tilde '${config.worktree_base}')
+        CHECKOUT=$(expand_tilde '${config.checkout}')
+        SAFE_REPO=$(printf '%s' "${config.repo}" | tr '/:' '__')
+        RUN="$BASE/deploy-${SAFE_REPO}-${SHA}"
+        post_status() {
+          [ -n "${config.status_context}" ] || return 0
+          lasius --root "$ROOT" forge status create "$CHECKOUT" \
+            --sha "$SHA" --state "$1" --context "${config.status_context}" \
+            --description "$2" --json >/dev/null 2>&1 \
+            || echo "warn: verdict status post failed ($1)"
+        }
+        cleanup() {
+          lasius --root "$ROOT" vcs worktree remove "$CHECKOUT" --dir "$RUN" \
+            --json >/dev/null 2>&1 || true
+        }
+        trap cleanup EXIT
+        mkdir -p "$BASE"
+        # Clone-if-missing — `lasius add` is a no-op when the clone
+        # exists (needs GH_TOKEN for `gh repo list`, injected above).
+        [ -d "$CHECKOUT/.git" ] || lasius --root "$ROOT" add "${CHECKOUT##*/}" >/dev/null
+        lasius --root "$ROOT" vcs fetch "$CHECKOUT" --json >/dev/null \
+          || { post_status failure "deploy failed: git fetch"; echo "fetch failed"; exit 1; }
+        # Stale dir from a crashed run — remove the registered
+        # worktree first, then any plain-dir leftover.
+        lasius --root "$ROOT" vcs worktree remove "$CHECKOUT" --dir "$RUN" --json >/dev/null 2>&1 || true
+        [ ! -e "$RUN" ] || rm -rf "$RUN"
+        lasius --root "$ROOT" vcs worktree add "$CHECKOUT" --dir "$RUN" --rev "$SHA" --json >/dev/null \
+          || { post_status failure "deploy failed: worktree add"; echo "worktree add failed"; exit 1; }
+        (
+          set -euo pipefail
+          cd "$RUN"
+          ${config.install_cmd}
+          ${config.deploy_cmd}
+        )
+        RC=$?
+        if [ "$RC" -eq 0 ]; then
+          post_status success "deploy finished"
+          echo "deploy done: ${config.repo} @ ${SHA:0:12}"
+          exit 0
+        fi
+        post_status failure "deploy failed (rc=$RC)"
+        echo "deploy failed: ${config.repo} @ ${SHA:0:12} rc=$RC"
+        exit 1
+      emit:
+        "0": "deploy.done.${event.match.1}"
+        default: "deploy.failed.${event.match.1}"
+
+  # --- cooldown: the throttle -------------------------------------------
+  # Sleeps cooldown_secs AFTER the deploy+verdict settle, keeping the
+  # run active so subsequent pushes queue (latest-wins → newest only).
+  # Fires on done AND failed — a broken deploy still rate-limits
+  # retries. Node timeout (3660s) is literal and must exceed
+  # config.cooldown_secs; a timeout kill ends the run early, which
+  # only weakens the window, never wedges the pipeline.
+  - id: deploy.cooldown
+    driver: shell
+    on:
+      - deploy.done.*
+      - deploy.failed.*
+    emits:
+      - deploy.idle.*
+      - deploy.cooldown.failed.*
+    max_fires: unlimited
+    params:
+      timeout: 3660
+      cmd: |
+        set -euo pipefail
+        sleep "${config.cooldown_secs}"
+        echo "cooldown over (${config.cooldown_secs}s) for ${event.match.1}"
+      emit:
+        "0": "deploy.idle.${event.match.1}"
+        default: "deploy.cooldown.failed.${event.match.1}"

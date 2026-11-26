@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "deploy params",
+  "type": "object",
+  "properties": {
+    "repo": {
+      "type": "string",
+      "description": "Watched repository as owner/name — REQUIRED per deployment. Drives the webhook repo filter and the route node's defensive re-check.",
+      "default": ""
+    },
+    "webhook_secret_env": {
+      "type": "string",
+      "description": "Env var holding this repo's webhook HMAC secret — the BUPHA_WH_<OWNER>_<REPO> convention (uppercased, '-' → '_'). REQUIRED per deployment; the var must exist in the campaign service env (~/.config/peregrin/env or cuora).",
+      "default": ""
+    },
+    "checkout": {
+      "type": "string",
+      "description": "Local clone path lasius operates on — REQUIRED per deployment.",
+      "default": ""
+    },
+    "deploy_ref": {
+      "type": "string",
+      "description": "Full git ref whose pushes trigger a deploy — also the webhook driver's push_refs filter. Deploys fire on merges to the default branch; PR-branch pushes never reach the campaign.",
+      "default": "refs/heads/main"
+    },
+    "worktree_base": {
+      "type": "string",
+      "description": "Deploy worktrees land here, one dir per sha (deploy-<repo>-<sha>), removed by trap on every exit path.",
+      "default": "$HOME/.local/share/deploy/worktrees"
+    },
+    "install_cmd": {
+      "type": "string",
+      "description": "Dependency install run at the worktree root before deploy_cmd — a fresh worktree has no node_modules.",
+      "default": "bun install --frozen-lockfile 2>/dev/null || bun install"
+    },
+    "deploy_cmd": {
+      "type": "string",
+      "description": "The deploy itself, run at the worktree root — REQUIRED per deployment. e.g. 'bun run build && bun run deploy' for the alchemy services, 'bun run deploy' where the script self-builds.",
+      "default": ""
+    },
+    "cooldown_secs": {
+      "type": "integer",
+      "description": "Minimum seconds between deploy starts per service — the run sleeps this long AFTER the deploy+status settle. Must stay under the cooldown node's 3660s timeout.",
+      "default": 900
+    },
+    "status_context": {
+      "type": "string",
+      "description": "Commit-status context posted on each deployed sha (pending → success/failure), e.g. 'deploy/product'. Empty disables status posts entirely.",
+      "default": ""
+    },
+    "lasius_root": {
+      "type": "string",
+      "description": "lasius workspace root (--root flag); repo args are checkout paths so any lasius.toml workspace works.",
+      "default": "/home/luis/GitHub/ktbhealth"
+    }
+  },
+  "additionalProperties": true
+}
