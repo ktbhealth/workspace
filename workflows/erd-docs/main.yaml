@@ -25,11 +25,13 @@
 # it is the bundle's whole purpose, scoped to a throwaway clone).
 #
 # Auth: the GitHub webhook HMAC comes from config.webhook_secret_env
-# (BUPHA_WH_* convention). The docs push authenticates with
-# ${secret.GITHUB_TOKEN} via http.extraHeader — the token needs
-# contents:write on ktbhealth/docs (same secret pr-review uses for
-# forge ops; if it is product-repo-scoped only, mint a docs-capable
-# one — see README).
+# (BUPHA_WH_* convention). Git auth uses a scoped credential helper
+# answering x-access-token/${secret.GITHUB_TOKEN} — NOT
+# http.extraHeader: the host gitconfig registers `gh auth
+# git-credential` for github.com, and GitHub rejects the resulting
+# duplicate/conflicting Authorization+Basic pair ("invalid
+# credentials"). The token needs contents:write on ktbhealth/docs
+# (same secret pr-review uses for forge ops).
 name: erd-docs
 
 annotations:
@@ -55,10 +57,10 @@ config:
   # ops/shell params get no $HOME expansion in some paths, so the
   # default is spelled out.
   worktree_base: "/home/luis/.local/share/erd-docs/worktrees"
-  # Docs repo clone URL (https — pushed via GITHUB_TOKEN header, no
-  # ssh-agent needed inside the service).
+  # Docs repo clone URL (https — clone+push auth via the scoped
+  # credential helper, no ssh-agent needed inside the service).
   docs_repo_url: "https://github.com/ktbhealth/docs.git"
-  # Product repo URL for the fresh clone (https + GH_TOKEN header —
+  # Product repo URL for the fresh clone (https + credential helper —
   # the repo is private; PR refs are fetched explicitly).
   product_repo_url: "https://github.com/ktbhealth/product.git"
   # bun binary dir prepended to PATH inside regen (systemd services
@@ -174,18 +176,27 @@ nodes:
         mkdir -p "$WT"
         trap 'rm -rf "$WT"' EXIT
 
-        # Fresh product clone at the PR head. blob:none keeps it fast;
-        # every git call carries the token header — the repo is
-        # private, and lazy blob fetches during checkout need auth too.
-        AUTH="http.extraHeader=Authorization: Bearer ${GH_TOKEN}"
-        git -c "$AUTH" clone --quiet --filter=blob:none "${config.product_repo_url}" "$WT/product"
-        git -C "$WT/product" -c "$AUTH" fetch --quiet origin "pull/${PR}/head"
-        git -C "$WT/product" -c "$AUTH" checkout --quiet FETCH_HEAD
+        # Auth: a scoped credential helper answers
+        # x-access-token/$GH_TOKEN for github.com. credential.helper=
+        # (empty) first clears the inherited helper list — the host
+        # gitconfig registers `gh auth git-credential`, whose Basic
+        # credentials conflict with ours and GitHub answers
+        # "invalid credentials". No token in URLs or .git/config.
+        GIT_AUTH=(
+          -c credential.helper=
+          -c 'credential.https://github.com.helper=!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'
+        )
 
-        # Docs clone — fresh https clone; both clone and push go
-        # through http.extraHeader with GH_TOKEN (repo is private;
-        # no ssh-agent, no stored credential in .git/config).
-        git -c "$AUTH" clone --quiet "${config.docs_repo_url}" "$WT/docs"
+        # Fresh product clone at the PR head. blob:none keeps it fast;
+        # every networked git call carries the helper — the repo is
+        # private, and lazy blob fetches during checkout need auth too.
+        git "${GIT_AUTH[@]}" clone --quiet --filter=blob:none "${config.product_repo_url}" "$WT/product"
+        git -C "$WT/product" "${GIT_AUTH[@]}" fetch --quiet origin "pull/${PR}/head"
+        git -C "$WT/product" checkout --quiet FETCH_HEAD
+
+        # Docs clone — fresh https clone; clone and push both go
+        # through the same helper (repo is private).
+        git "${GIT_AUTH[@]}" clone --quiet "${config.docs_repo_url}" "$WT/docs"
 
         (cd "$WT/product" && bun install --frozen-lockfile --silent)
         (cd "$WT/product" && bun run db:erd >/dev/null)
@@ -201,8 +212,7 @@ nodes:
           -c user.name="github-actions[bot]" \
           -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
           commit --quiet -m "docs(db): regenerate ERD for ${DOCS_BRANCH}"
-        git -C "$WT/docs" \
-          -c http.extraHeader="Authorization: Bearer ${GH_TOKEN}" \
+        git -C "$WT/docs" "${GIT_AUTH[@]}" \
           push --quiet origin "HEAD:refs/heads/${DOCS_BRANCH}"
         echo "pushed docs branch ${DOCS_BRANCH} for PR #${PR} @ ${SHA:0:12}"
       emit:

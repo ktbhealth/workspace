@@ -20,7 +20,7 @@
     },
     "docs_repo_url": {
       "type": "string",
-      "description": "Docs repo clone URL — pushed via http.extraHeader + GITHUB_TOKEN, so https (no ssh-agent needed).",
+      "description": "Docs repo clone URL — cloned+pushed via a scoped credential helper + GITHUB_TOKEN, so https (no ssh-agent needed).",
       "default": "https://github.com/ktbhealth/docs.git"
     },
     "product_repo_url": {

@@ -16,7 +16,7 @@ guard (repo match, fork skip, per-sha run state) → regen:
 3. `bun install --frozen-lockfile && bun run db:erd`
 4. docs tree dirty → `checkout -B <head_ref>` (fork `owner:` prefix and
    `refs/heads/` stripped), commit, `push origin HEAD:refs/heads/<branch>`
-   via `http.extraHeader` + `GITHUB_TOKEN`
+   via a scoped git credential helper + `GITHUB_TOKEN`
 5. clean tree → `erd-docs.clean.<sha>` no-op
 
 Everything lives in throwaway clones under `worktree_base` — the
@@ -28,8 +28,9 @@ bundle never touches `repos/product` or `repos/docs` checkouts.
   nodes end to end. The docs push is a raw `git push` because
   `lasius forge` has no docs-branch verb (PR/status verbs only).
 - **Auth** — webhook HMAC via `webhook_secret_env` (BUPHA_WH_*); the
-  docs push reuses the `GITHUB_TOKEN` secret (`http.extraHeader`,
-  never written to `.git/config`). The token needs `contents:write`
+  docs clone/push reuses the `GITHUB_TOKEN` secret (scoped
+  credential helper — `http.extraHeader` conflicts with the host's
+  `gh auth git-credential` helper; token never in URLs or `.git/config`). The token needs `contents:write`
   on `ktbhealth/docs` — if the shared forge token is product-scoped,
   mint a docs-capable one under the same secret name.
 - **Drafts included** — the `erd` check runs on drafts; regenerating
