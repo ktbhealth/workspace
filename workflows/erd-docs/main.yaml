@@ -58,8 +58,8 @@ config:
   # Docs repo clone URL (https — pushed via GITHUB_TOKEN header, no
   # ssh-agent needed inside the service).
   docs_repo_url: "https://github.com/ktbhealth/docs.git"
-  # Product repo URL for the fresh clone (https; public-read is fine,
-  # PR refs are fetched explicitly).
+  # Product repo URL for the fresh clone (https + GH_TOKEN header —
+  # the repo is private; PR refs are fetched explicitly).
   product_repo_url: "https://github.com/ktbhealth/product.git"
   # bun binary dir prepended to PATH inside regen (systemd services
   # get a minimal PATH).
@@ -182,10 +182,10 @@ nodes:
         git -C "$WT/product" -c "$AUTH" fetch --quiet origin "pull/${PR}/head"
         git -C "$WT/product" -c "$AUTH" checkout --quiet FETCH_HEAD
 
-        # Docs clone — fresh https clone; push goes through
-        # http.extraHeader with GH_TOKEN (no ssh-agent, no stored
-        # credential in .git/config).
-        git clone --quiet "${config.docs_repo_url}" "$WT/docs"
+        # Docs clone — fresh https clone; both clone and push go
+        # through http.extraHeader with GH_TOKEN (repo is private;
+        # no ssh-agent, no stored credential in .git/config).
+        git -c "$AUTH" clone --quiet "${config.docs_repo_url}" "$WT/docs"
 
         (cd "$WT/product" && bun install --frozen-lockfile --silent)
         (cd "$WT/product" && bun run db:erd >/dev/null)
