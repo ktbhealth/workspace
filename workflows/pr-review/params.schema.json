@@ -38,6 +38,11 @@
       "description": "Per-PR cap on agent review attempts — counted in <worktree_base>/attempts/pr-<n>-reviews, durable across restarts.",
       "default": 2
     },
+    "agent_lock_ttl_minutes": {
+      "type": "integer",
+      "description": "Stale agent-lock TTL — locks older than this (crashed agent) are broken instead of blocking re-review and the merge gate forever. Must exceed the agent turn timeout (~29min).",
+      "default": 45
+    },
     "verify_cmd": {
       "type": "string",
       "description": "Verification command embedded in the agent prompt — the agent runs it inside the worktree; the campaign does not execute it.",

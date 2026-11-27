@@ -109,6 +109,11 @@ config:
   # Per-PR cap on agent review attempts — counted in
   # <worktree_base>/attempts/pr-<repo>-<n>-reviews, survives restarts.
   max_review_attempts: 2
+  # Stale agent-lock TTL in minutes. A lock is a bare mkdir held for the
+  # whole review turn (agent timeout is ~29min); a crashed campaign
+  # leaves it behind forever and blocks both re-review and the merge
+  # gate. Locks older than this are treated as dead and broken.
+  agent_lock_ttl_minutes: 45
   # Verification command the agent must leave passing — the prompt
   # embeds it verbatim; it is NOT executed by the campaign (the agent
   # runs it inside the worktree).
@@ -471,8 +476,16 @@ nodes:
         # in-flight chain and must survive.
         LOCK="${config.worktree_base}/${SHA}.agent-lock"
         if ! mkdir "$LOCK" 2>/dev/null; then
-          echo "review already in flight for $SHA" >&2
-          exit 3
+          # Stale lock: a crashed agent leaves the dir behind forever.
+          # Older than the TTL → the holder is dead; break and retry.
+          if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +${config.agent_lock_ttl_minutes} 2>/dev/null)" ]; then
+            echo "breaking stale agent lock for $SHA (>${config.agent_lock_ttl_minutes}m)" >&2
+            rmdir "$LOCK" 2>/dev/null || true
+            mkdir "$LOCK" 2>/dev/null || { echo "review already in flight for $SHA" >&2; exit 3; }
+          else
+            echo "review already in flight for $SHA" >&2
+            exit 3
+          fi
         fi
         trap 'rc=$?; if [ "$rc" -ne 0 ]; then rmdir "$LOCK" 2>/dev/null || true; fi' EXIT
         # PR title/body for the prompt — best effort, never fatal.
@@ -905,7 +918,9 @@ nodes:
         SHA='${event.match.1}'
         # A review agent holding the per-sha lock means adjustments are
         # in flight — wait for the next ci.signal on the new head.
-        if [ -d "${config.worktree_base}/${SHA}.agent-lock" ]; then
+        # Locks older than the TTL are stale (crashed agent) — ignore.
+        LOCK="${config.worktree_base}/${SHA}.agent-lock"
+        if [ -d "$LOCK" ] && [ -z "$(find "$LOCK" -maxdepth 0 -mmin +${config.agent_lock_ttl_minutes} 2>/dev/null)" ]; then
           echo "review agent in flight for $SHA — waiting"
           exit 4
         fi
