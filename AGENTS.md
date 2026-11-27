@@ -47,6 +47,10 @@ community health).
   `repos/.github/packs/loc/loc.yaml` — `lasius doctor` enforces it
   (`loc coverage` check). The weekly `loc` workflow publishes the
   metrics page to `repos/docs`.
+- `repos/docs` content is machine-owned: generated pages come from
+  `bun run db:erd` in product, prose sync from the `docs` peregrin
+  workflow (`workflows/docs/`). Don't hand-edit docs pages from other
+  repos — note staleness in the PR body instead.
 
 ## Workspace commands
 

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "docs params",
+  "type": "object",
+  "properties": {
+    "repo": {
+      "type": "string",
+      "description": "Watched repository as owner/name — the PRODUCT repo whose merges trigger doc syncs. REQUIRED per deployment. Drives the webhook repo filter.",
+      "default": ""
+    },
+    "webhook_secret_env": {
+      "type": "string",
+      "description": "Env var holding this repo's webhook HMAC secret — the BUPHA_WH_<OWNER>_<REPO> convention (uppercased, '-' → '_'). REQUIRED per deployment; the var must exist in the campaign service env (~/.config/peregrin/env or cuora).",
+      "default": ""
+    },
+    "checkout": {
+      "type": "string",
+      "description": "Local clone path of the DOCS repo lasius operates on — worktrees are created off it and the docs PR is opened against it. REQUIRED per deployment.",
+      "default": ""
+    },
+    "product_checkout": {
+      "type": "string",
+      "description": "Local clone path of the PRODUCT repo — read-only source of truth for the agent (product main is fetched here) and the repo arg for `lasius forge pr view`. REQUIRED per deployment.",
+      "default": ""
+    },
+    "worktree_base": {
+      "type": "string",
+      "description": "Run state (run-<sha>/), docs worktrees (wt-<sha>/), the global .sync-lock, session ids, and the cleanup ledger land here.",
+      "default": "$HOME/.local/share/docs-sync/worktrees"
+    },
+    "base_branch": {
+      "type": "string",
+      "description": "Product base branch a merge must target to trigger a sync (payload.base_ref check) and the ref fetched as the sync point.",
+      "default": "main"
+    },
+    "agent": {
+      "type": "string",
+      "description": "sepia agent-config id for sync sessions.",
+      "default": "devin"
+    },
+    "agent_mode": {
+      "type": "string",
+      "description": "ACP session mode applied via session/set_mode. REQUIRED for unattended runs — devin's default accept-edits prompts on exec and deadlocks. 'bypass' auto-approves all tools; 'smart' auto-runs model-judged-safe actions; 'accept-edits' only auto-approves edits.",
+      "default": "bypass"
+    },
+    "lasius_root": {
+      "type": "string",
+      "description": "lasius workspace root (--root flag); repo args are checkout paths so any lasius.toml workspace works.",
+      "default": "/home/luis/GitHub/ktbhealth"
+    }
+  },
+  "required": ["repo", "webhook_secret_env", "checkout", "product_checkout"],
+  "additionalProperties": true
+}

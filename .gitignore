@@ -15,6 +15,8 @@ dist/
 # OS noise
 .DS_Store
 docs/
+# ...except the workflows/docs/ peregrin bundle (campaign, not output).
+!workflows/docs/
 
 # Lint plugin packages ship built output — oxlint jsPlugins consume plain JS.
 !packages/eslint-*/dist/
