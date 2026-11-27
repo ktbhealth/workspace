@@ -212,8 +212,12 @@ nodes:
           -c user.name="github-actions[bot]" \
           -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
           commit --quiet -m "docs(db): regenerate ERD for ${DOCS_BRANCH}"
+        # --force-with-lease: a same-named docs branch may already
+        # exist from an earlier head of this PR — docs branches are
+        # derived state, so overwriting is correct; the lease still
+        # refuses to clobber anything pushed after our clone.
         git -C "$WT/docs" "${GIT_AUTH[@]}" \
-          push --quiet origin "HEAD:refs/heads/${DOCS_BRANCH}"
+          push --quiet --force-with-lease "origin" "HEAD:refs/heads/${DOCS_BRANCH}"
         echo "pushed docs branch ${DOCS_BRANCH} for PR #${PR} @ ${SHA:0:12}"
       emit:
         "0": "erd-docs.pushed.${event.match.1}"
