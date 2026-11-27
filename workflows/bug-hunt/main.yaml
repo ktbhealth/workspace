@@ -1,0 +1,984 @@
+# bug-hunt — manual sweep: pick next slice → sepia audit agent finds
+# real bugs → per-finding sepia fix agent → verify (install + scoped
+# vp check + package vitest + optional playwright e2e) → commit →
+# push branch → `lasius forge pr create` → pr-review bundle takes
+# over (agent review → verified-green checks → squash merge).
+#
+# Shape mirrors pr-review: lasius owns every git/forge call, sepia
+# owns agent sessions (sessions.run ops query — ensure+mode+
+# prompt_wait in ONE serve dispatch), peregrin owns event routing,
+# tamias distributes. Differences: NO webhook ingress — the run is
+# triggered manually (`peregrin campaign run|submit`), the `start`
+# engine event is the only trigger, and all per-run state lives in
+# FILES under worktree_base because event types are unsuffixed (the
+# `start` trigger carries no payload/match to template into types).
+#
+# Flow (all event types unsuffixed — one slice + one finding in
+# flight per run, sequential loop):
+#
+#   start ──► pick (cursor round-robin over config.slices, skips
+#   slices audited within config.rescan_days) ──► bug-hunt.slice
+#     ──► fetch ──► prune ──► worktree.add (audit-current @ base_ref)
+#     ──► audit.prompt (stdout = prompt; copies existing findings
+#     into the worktree for dedupe) ──► audit.run (sepia)
+#     ──► audit.gate (stopReason/timedOut + session id) ──►
+#     findings.ready | findings.none | findings.failed
+#
+#   findings.ready ──► fix.pick (next eligible finding →
+#   current-finding.json + current-slice) ──► bug-hunt.fixgo
+#     ──► wt.rm (best effort) ──► wt.add (fix-current @ base_ref)
+#     ──► fix.prompt ──► fix.run (sepia) ──► fix.gate
+#     (dirty-tree check; .bughunt/ excluded) ──► verify.go | nodiff
+#     ──► verify (bun install + vp check <changed> + per-package
+#     vitest + e2e when paths match) ──► commit ──► push
+#     (HEAD:refs/heads/bug-hunt/<slice>/<n>-<slug>) ──► ship
+#     (forge pr create, marks finding shipped+pr#) ──► pr.opened
+#     ──► fix.cleanup ──► bug-hunt.fixdone ──► fix.pick (loop)
+#
+#   fix.pick with nothing eligible ──► bug-hunt.slicedone
+#   findings.none ──► auditfin ──► bug-hunt.slicedone
+#     ──► finish (audited stamp + audit worktree/session cleanup)
+#     ──► bug-hunt.run.done
+#
+# Failure hygiene: every per-finding terminal (agent fail, nodiff,
+# verify fail, commit/push/PR fail, worktree fail) funnels through
+# fix.cleanup which marks the finding failed (attempts already
+# counted at pick), removes the fix worktree, deletes-or-retains
+# the sepia session (7d retain on non-shipped paths, reconcile via
+# cleanup-ledger.jsonl), and re-emits fixdone so the loop continues
+# with the next finding. Audit-side failures emit run.failed — the
+# cursor already advanced, so the next manual run moves to the next
+# slice. Stale worktrees/locks are gc'd at pick time.
+#
+# Raw-git exception: fix.gate's dirty check and commit's .bughunt
+# sweep use `git -C` read/remove-only plumbing — lasius exposes no
+# worktree-status or clean verb (vcs has worktree/commit/push/fetch
+# only). No forge/history mutation happens outside lasius.
+name: bug-hunt
+
+annotations:
+  title: Bug hunt — slice audit → verified fix → PR per finding
+  description: >-
+    Manual sweep over the product repo: a sepia agent audits one
+    slice per run for real bugs, then per confirmed finding a second
+    agent applies a minimal fix that must pass scoped checks
+    (vp check + package vitest + optional playwright e2e) before a
+    branch is pushed and a PR opened — pr-review merges it once
+    green.
+  author: ktbhealth
+  tags: [bug-hunt, audit, agent, workflow]
+  since: "0.1.0"
+
+config:
+  # Local clone lasius operates on. REQUIRED per deployment.
+  checkout: ""
+  # lasius workspace root (--root).
+  lasius_root: "/home/luis/GitHub/ktbhealth"
+  # Base ref worktrees are cut from and PRs target.
+  base_ref: "main"
+  # State + worktrees — MUST be absolute (ops params get no shell
+  # $HOME expansion). Holds cursor, audited stamps, per-slice
+  # findings ledgers, current-slice/current-finding, sessions/,
+  # cleanup-ledger.jsonl, audit-current/ and fix-current/ worktrees.
+  worktree_base: "/home/luis/.local/share/bug-hunt/worktrees"
+  # sepia agent id for audit/fix sessions.
+  agent: "devin"
+  # ACP session mode — REQUIRED for unattended runs (devin's default
+  # accept-edits prompts on exec and deadlocks). Same contract as
+  # pr-review.
+  agent_mode: "bypass"
+  # Slice manifest: `id=path1,path2;id2=...` — repo-relative path
+  # prefixes the audit agent scopes to. Round-robin via cursor.
+  slices: >-
+    web-routes=apps/web/src/routes;
+    web-lib=apps/web/src/lib,apps/web/src/server.ts,apps/web/src/start.ts,apps/web/src/router.tsx,apps/web/src/plugins.ts,apps/web/src/env.d.ts;
+    apps-edge=apps/jobs-worker,apps/cli;
+    i18n-pkg=packages/i18n;
+    theme-media=plugins/theme,plugins/fonts,plugins/image;
+    content=plugins/i18n,plugins/pages,plugins/templates,plugins/layouts,plugins/rich-text,plugins/site,plugins/site-builder,plugins/document-store;
+    clinical=plugins/consultations,plugins/patients,plugins/doctors,plugins/clinician,plugins/secretaries,plugins/patient-portal,plugins/patient-access,plugins/portal,plugins/agenda,plugins/dashboard;
+    platform-core=plugins/auth,plugins/rbac,plugins/audit,plugins/tenant,plugins/api,plugins/queue,plugins/pubsub,plugins/jobs,plugins/cron,plugins/notifications,plugins/middleware,plugins/platform-header,plugins/error-page,plugins/not-found-page;
+    platform-tools=plugins/sign-in-page,plugins/invites,plugins/groups,plugins/users,plugins/audience,plugins/verify-email,plugins/credentials,plugins/machines,plugins/triggers,plugins/manager,plugins/schemas,plugins/flows,plugins/forms,plugins/builder-blocks,plugins/wizards,plugins/views,plugins/vault,plugins/pipeline,plugins/pipeline-transcript,plugins/storage-dataset,plugins/transcription-tts,plugins/transcription-asr,plugins/llm-eval,plugins/eval-persona,plugins/eval-validator,plugins/dev-capture-test;
+    pkg-platform=packages/app-host,packages/platform,packages/server-fns,packages/builder,packages/kernel,packages/driver-framework,packages/pipeline,packages/dsl,packages/json-schema,packages/seed,packages/observability,packages/observability-otlp;
+    pkg-data=packages/db,packages/db-sqlite,packages/crypto,packages/crypto-stub,packages/auth,packages/auth-better,packages/authz,packages/tenant,packages/rbac,packages/calendar,packages/captcha,packages/captcha-stub,packages/captcha-turnstile,packages/export-pdf,packages/interop,packages/interop-fhir,packages/interop-openehr,packages/anamnesis,packages/bot,packages/bot-recall,packages/vault-keyring;
+    pkg-ai=packages/ai-adapter-acp,packages/ai-adapter-node,packages/ai-adapter-openai,packages/ai-adapter-systemone,packages/ai-bridge,packages/anamnesis-llm,packages/eval-adapter-cloud,packages/eval-adapter-local,packages/eval-adapter-stub,packages/eval-cli,packages/eval-core;
+    pkg-jobs=packages/jobs-port,packages/jobs-transport-redis,packages/pubsub-port,packages/pubsub-transport-redis,packages/queues-port,packages/scheduler-port,packages/scheduler-do,packages/cron-port,packages/email,packages/email-cloudflare,packages/email-smtp,packages/email-stub,packages/transcription,packages/transcription-whisper,packages/transcription-webspeech;
+    infra-evals=infra,tools,evals
+  # A slice whose audited stamp is younger than this many days is
+  # skipped (0 = always eligible).
+  rescan_days: 1
+  # Cap on findings kept per slice (severity-sorted, existing entries
+  # win over new ones at the cap).
+  max_findings_per_slice: 10
+  # Per-finding fix attempts across ALL runs — durable in the slice
+  # findings ledger; exhausted findings are marked failed.
+  max_fix_attempts: 2
+  # Per-run cap on findings processed (bounds one manual run's cost).
+  max_fixes_per_run: 5
+  # Verification inside the fix worktree after the agent finishes:
+  # bun install --frozen-lockfile, then this command, then
+  # `bunx vitest run` in every touched package dir, then e2e when the
+  # diff matches e2e_path_prefixes (e2e_mode auto|always|never).
+  verify_cmd: "bunx vp check"
+  e2e_mode: "auto"
+  e2e_path_prefixes: "apps/web/src/routes,apps/web/src/components,apps/web/src/router.tsx,apps/web/src/server.ts,apps/web/src/start.ts,apps/web/src/plugins.ts"
+  e2e_cmd: "bun run test:e2e"
+  # Agent turn cap is hardcoded at 1740000ms (29min) on the
+  # sessions.run nodes — under tamias serve's 30min driver.query
+  # clamp (same as pr-review).
+
+capabilities:
+  secrets:
+    - GITHUB_TOKEN
+
+nodes:
+  # --- pick: cursor round-robin over config.slices -------------------
+  # `start` is the only trigger (manual `campaign run`/`submit`). The
+  # chosen slice id is persisted to <wb>/current-slice — downstream
+  # shell nodes read it; event types stay unsuffixed because `start`
+  # carries no payload to template into types.
+  - id: bug-hunt.pick
+    driver: shell
+    on:
+      - start
+    emits:
+      - bug-hunt.slice
+      - bug-hunt.run.done
+      - bug-hunt.run.failed
+    max_fires: 1
+    params:
+      cmd: |
+        set -euo pipefail
+        WB="${config.worktree_base}"
+        mkdir -p "$WB/audited" "$WB/slices" "$WB/sessions"
+        # Best-effort gc of leftovers from a dead run.
+        lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WB/audit-current" --json >/dev/null 2>&1 || true
+        lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WB/fix-current" --json >/dev/null 2>&1 || true
+        # A fresh engine run means no fix pipeline can be in flight —
+        # any fix.lock is a corpse from a dead run.
+        rmdir "$WB/fix.lock" 2>/dev/null || true
+        RESCAN_MIN=$(( ${config.rescan_days} * 1440 ))
+        CUR=$(cat "$WB/cursor" 2>/dev/null || true)
+        # Rotate the slice list so scanning starts AFTER the cursor.
+        ORDER=$(printf '%s' "${config.slices}" | tr ';' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | awk -v cur="$CUR" '
+          { ids[NR]=$0 } END {
+            start=1
+            for (i=1;i<=NR;i++) if (ids[i] ~ "^" cur "=") start=i+1
+            for (k=0;k<NR;k++) print ids[(start-1+k)%NR+1]
+          }')
+        PICKED=""
+        while IFS= read -r entry; do
+          id=${entry%%=*}
+          stamp="$WB/audited/$id"
+          if [ -f "$stamp" ] && [ "$RESCAN_MIN" -gt 0 ] && [ -z "$(find "$stamp" -mmin +"$RESCAN_MIN" 2>/dev/null)" ]; then
+            continue
+          fi
+          PICKED=$id
+          break
+        done <<< "$ORDER"
+        if [ -z "$PICKED" ]; then
+          echo "all slices audited within rescan window — nothing to do" >&2
+          exit 3
+        fi
+        printf '%s' "$PICKED" > "$WB/current-slice"
+        printf '%s' "$PICKED" > "$WB/cursor"
+        # Per-run token bounds max_fixes_per_run across the fix loop.
+        date +%s%N > "$WB/run-token"
+        echo "picked slice: $PICKED" >&2
+      emit:
+        "0": "bug-hunt.slice"
+        "3": "bug-hunt.run.done"
+        default: "bug-hunt.run.failed"
+      timeout: 120
+
+  # --- backlog: skip the audit when the ledger already has work ------
+  # A re-run over a slice with pending/picked findings resumes the
+  # fix loop immediately instead of paying another audit turn — the
+  # audit chain still runs in parallel (fresh eyes, dedupe via the
+  # ledger) and its findings.ready just re-triggers fix.pick, which
+  # serializes on fix.lock.
+  - id: bug-hunt.backlog
+    driver: shell
+    on:
+      - bug-hunt.slice
+    emits:
+      - bug-hunt.findings.ready
+      - bug-hunt.nobacklog
+    max_fires: 1
+    params:
+      cmd: |
+        set -euo pipefail
+        WB="${config.worktree_base}"
+        SLICE=$(cat "$WB/current-slice")
+        LEDGER="$WB/slices/$SLICE.findings.json"
+        [ -f "$LEDGER" ] || exit 3
+        N=$(jq '[.findings[] | select(.status == "pending" or .status == "picked")] | length' "$LEDGER")
+        [ "$N" -gt 0 ] || exit 3
+        echo "backlog: $N eligible findings for slice $SLICE — fix loop starts now" >&2
+      emit:
+        "0": "bug-hunt.findings.ready"
+        "3": "bug-hunt.nobacklog"
+        default: "bug-hunt.run.failed"
+      timeout: 30
+
+  # --- audit worktree: fetch → prune → add ---------------------------
+  - id: bug-hunt.fetch
+    driver: ops
+    on:
+      - bug-hunt.slice
+    emits:
+      - bug-hunt.fetched
+      - bug-hunt.run.failed
+    max_fires: 1
+    params:
+      driver: lasius
+      query: cli.vcs.fetch
+      params:
+        root: "${config.lasius_root}"
+        repo: "${config.checkout}"
+        json: true
+      emit:
+        success: "bug-hunt.fetched"
+        failure: "bug-hunt.run.failed"
+      timeout: 120
+
+  - id: bug-hunt.prune
+    driver: ops
+    on:
+      - bug-hunt.fetched
+    emits:
+      - bug-hunt.pruned
+    max_fires: 1
+    params:
+      driver: lasius
+      query: cli.vcs.worktree.remove
+      params:
+        root: "${config.lasius_root}"
+        repo: "${config.checkout}"
+        dir: "${config.worktree_base}/audit-current"
+        json: true
+      emit:
+        success: "bug-hunt.pruned"
+        failure: "bug-hunt.pruned"
+      timeout: 60
+
+  - id: bug-hunt.worktree.add
+    driver: ops
+    on:
+      - bug-hunt.pruned
+    emits:
+      - bug-hunt.audit.ready
+      - bug-hunt.audit.failed
+    max_fires: 1
+    params:
+      driver: lasius
+      query: cli.vcs.worktree.add
+      params:
+        root: "${config.lasius_root}"
+        repo: "${config.checkout}"
+        dir: "${config.worktree_base}/audit-current"
+        rev: "${config.base_ref}"
+        json: true
+      emit:
+        success: "bug-hunt.audit.ready"
+        failure: "bug-hunt.audit.failed"
+      timeout: 120
+
+  # --- audit: prompt assembly (stdout IS the prompt) ------------------
+  # Copies the slice's existing findings ledger into the worktree so
+  # the agent can dedupe against bugs already reported/fixed.
+  - id: bug-hunt.audit.prompt
+    driver: shell
+    on:
+      - bug-hunt.audit.ready
+    emits:
+      - bug-hunt.audit.prompt.ready
+      - bug-hunt.audit.failed
+    max_fires: 1
+    params:
+      cmd: |
+        set -euo pipefail
+        WB="${config.worktree_base}"
+        WT="$WB/audit-current"
+        SLICE=$(cat "$WB/current-slice")
+        LEDGER="$WB/slices/$SLICE.findings.json"
+        mkdir -p "$WT/.bughunt"
+        if [ -f "$LEDGER" ]; then
+          jq '{findings: [.findings[] | {title, severity, path, line, status}]}' "$LEDGER" \
+            > "$WT/.bughunt/existing-findings.json" 2>/dev/null || echo '{"findings":[]}' > "$WT/.bughunt/existing-findings.json"
+        else
+          echo '{"findings":[]}' > "$WT/.bughunt/existing-findings.json"
+        fi
+        # Slice path prefixes for THIS slice id (entries may carry
+        # folded-scalar whitespace — trim each).
+        PATHS=$(printf '%s' "${config.slices}" | tr ';' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | awk -F= -v id="$SLICE" '$1==id {print $2}')
+        [ -n "$PATHS" ] || { echo "slice '$SLICE' not in manifest" >&2; exit 1; }
+        jq -nr \
+          --arg slice "$SLICE" \
+          --arg paths "$PATHS" \
+          --argjson maxfindings "${config.max_findings_per_slice}" \
+          '"You are auditing the slice \u0027\($slice)\u0027 of this repository for REAL bugs.\n\n" +
+           "Scope — audit ONLY these repo-relative paths (and files they directly depend on when needed to confirm a bug):\n\($paths)\n\n" +
+           "Read AGENTS.md first — the repo has strict conventions (Effect services behind ports, arch boundaries, no diagnosis/treatment copy).\n\n" +
+           "Hunt for correctness bugs, not style: logic errors, unhandled null/undefined, async/race conditions, broken Schema/effect validation, off-by-one, incorrect Effect/service usage, arch-boundary violations, dead ports/wiring, wrong i18n keys, resource leaks. Every finding must be something a maintainer would accept as a bug — no speculative refactors, no lint-level nits.\n\n" +
+           "CONTRACT — write your findings to .bughunt/findings.json in this worktree as a JSON array (empty array if none). Each element:\n" +
+           "{\"title\": string, \"severity\": \"critical\"|\"high\"|\"medium\"|\"low\", \"path\": repo-relative file, \"line\": number|null, \"detail\": what is wrong and why, \"repro\": how to observe it, \"suggested_fix\": minimal fix sketch}\n" +
+           "Report at most \($maxfindings) findings, highest severity first, only ones you are confident are real.\n\n" +
+           "ALREADY KNOWN — .bughunt/existing-findings.json lists findings from previous runs (with status). Do NOT re-report those; only report NEW bugs.\n\n" +
+           "This is a READ-ONLY audit: do not modify source files. You may run `bun install` and tests if it helps confirm a bug. Do not commit anything."'
+        echo "audit prompt assembled for slice $SLICE" >&2
+      emit:
+        "0": "bug-hunt.audit.prompt.ready"
+        default: "bug-hunt.audit.failed"
+      timeout: 120
+
+  # --- audit: sepia agent session (sessions.run = ensure+mode+wait) ---
+  - id: bug-hunt.audit.run
+    driver: ops
+    on:
+      - bug-hunt.audit.prompt.ready
+    emits:
+      - bug-hunt.audit.turn
+      - bug-hunt.audit.failed
+    max_fires: 1
+    retry:
+      max_attempts: 2
+      delay: 5000
+      backoff: fixed
+    params:
+      driver: sepia
+      query: sessions.run
+      env:
+        # Sandbox the agent subprocess (bubblewrap; worktree + agent
+        # state dirs writable, secrets masked). Keyed on
+        # config.agent — update both if the agent changes.
+        SEPIA_AGENT_DEVIN_COMMAND: "/home/luis/.local/bin/sepia-agent-sandbox devin acp"
+      params:
+        cwd: "${config.worktree_base}/audit-current"
+        agent: "${config.agent}"
+        title: "bug-hunt audit"
+        mode: "${config.agent_mode}"
+        text: "${event.payload.stdout}"
+        timeoutMs: 1740000
+      emit:
+        success: "bug-hunt.audit.turn"
+        failure: "bug-hunt.audit.failed"
+      timeout: 1900
+
+  # --- audit: turn-result gate + session id persist --------------------
+  - id: bug-hunt.audit.gate
+    driver: shell
+    on:
+      - bug-hunt.audit.turn
+    emits:
+      - bug-hunt.findings.ready
+      - bug-hunt.findings.none
+      - bug-hunt.findings.failed
+    max_fires: 1
+    params:
+      cmd: |
+        set -uo pipefail
+        WB="${config.worktree_base}"
+        WT="$WB/audit-current"
+        SLICE=$(cat "$WB/current-slice")
+        mkdir -p "$WB/sessions"
+        printf '%s' '${event.payload.result.data.id}' > "$WB/sessions/audit"
+        SR='${event.payload.result.data.stopReason}'
+        TO='${event.payload.result.data.timedOut}'
+        echo "audit turn: stopReason=${SR:-<none>} timedOut=${TO:-false}" >&2
+        [ "$TO" = "true" ] && exit 1
+        case "$SR" in end_turn|cancelled) ;; *) exit 1 ;; esac
+        # Validate + merge findings into the slice ledger, then decide
+        # ready (pending work exists) vs none (ledger fully resolved).
+        RAW="$WT/.bughunt/findings.json"
+        LEDGER="$WB/slices/$SLICE.findings.json"
+        if [ ! -f "$RAW" ]; then
+          echo "agent wrote no findings.json" >&2
+          exit 1
+        fi
+        if ! jq -e 'type == "array"' "$RAW" >/dev/null 2>&1; then
+          echo "findings.json is not a JSON array" >&2
+          exit 1
+        fi
+        MERGED=$(jq -nc \
+          --arg slice "$SLICE" \
+          --arg ts "$(date -u +%FT%TZ)" \
+          --argjson raw "$(cat "$RAW")" \
+          --argjson existing "$(cat "$LEDGER" 2>/dev/null || echo '{"findings":[]}')" \
+          --argjson cap "${config.max_findings_per_slice}" '
+          def sevrank: {critical:0,high:1,medium:2,low:3}[.severity] // 4;
+          def key: "\(.path // ""):\(.line // 0):\((.title // "")|ascii_downcase|gsub("[^a-z0-9]+";"-"))";
+          ($existing.findings // [] | map(. + {key:key})) as $old |
+          [ $raw[] | . + {status:"pending", attempts:0, run:null, pr:null, key:key} ] as $new |
+          # old entries win dedupe (they carry status/pr history)
+          ($old + $new | unique_by(.key)) as $merged |
+          # cap: pending sorted by severity fill remaining slots after
+          # all resolved entries; overflow pending is dropped.
+          ($merged | map(select(.status != "pending"))) as $resolved |
+          ($merged | map(select(.status == "pending")) | sort_by(sevrank)) as $pend |
+          ($resolved | length) as $r |
+          { slice:$slice, audited_at:$ts,
+            findings: ($resolved + ($pend[0:([ $cap - $r, 0 ] | max)])) }')
+        printf '%s\n' "$MERGED" > "$LEDGER"
+        PENDING=$(printf '%s' "$MERGED" | jq '[.findings[] | select(.status == "pending")] | length')
+        echo "slice $SLICE: $(printf '%s' "$MERGED" | jq '.findings | length') findings, $PENDING pending" >&2
+        [ "$PENDING" -gt 0 ] && exit 0
+        exit 4
+      emit:
+        "0": "bug-hunt.findings.ready"
+        "4": "bug-hunt.findings.none"
+        default: "bug-hunt.findings.failed"
+      timeout: 60
+
+  # --- audit terminal: nothing new ------------------------------------
+  # findings.none → stamp the slice audited, drop the audit worktree,
+  # delete the session (a clean audit is a success path), then
+  # slicedone → finish (which re-stamps idempotently and emits
+  # run.done). Kept as its own node so the finish node has ONE job.
+  - id: bug-hunt.auditfin
+    driver: shell
+    on:
+      - bug-hunt.findings.none
+    emits:
+      - bug-hunt.slicedone
+      - bug-hunt.run.failed
+    max_fires: 1
+    params:
+      cmd: |
+        set -uo pipefail
+        WB="${config.worktree_base}"
+        WT="$WB/audit-current"
+        SLICE=$(cat "$WB/current-slice")
+        touch "$WB/audited/$SLICE"
+        lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
+        SID=$(cat "$WB/sessions/audit" 2>/dev/null || true)
+        if [ -n "$SID" ]; then
+          sepia delete "$SID" --from "${config.agent}" >/dev/null 2>&1 || true
+        fi
+        echo "slice $SLICE audited — no pending findings" >&2
+        exit 0
+      emit:
+        "0": "bug-hunt.slicedone"
+        default: "bug-hunt.run.failed"
+      timeout: 60
+
+  # --- audit failure: worktree/prompt/run/gate-side errors ------------
+  # Cursor already advanced at pick, so the next run moves on. The
+  # audit session is RETAINED 7d for debugging (reconcile expires it).
+  - id: bug-hunt.auditfail
+    driver: shell
+    on:
+      - bug-hunt.audit.failed
+      - bug-hunt.findings.failed
+    emits:
+      - bug-hunt.run.failed
+    max_fires: 1
+    params:
+      cmd: |
+        set -uo pipefail
+        WB="${config.worktree_base}"
+        WT="$WB/audit-current"
+        SLICE=$(cat "$WB/current-slice" 2>/dev/null || echo unknown)
+        lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
+        SID=$(cat "$WB/sessions/audit" 2>/dev/null || true)
+        RETAIN_UNTIL=$(( $(date +%s) + 604800 ))
+        jq -nc --argjson ts "$(date +%s)" --arg key "audit-$SLICE" --arg sid "$SID" \
+          --arg wt "$WT" --argjson ru "$RETAIN_UNTIL" --arg et "${event.type}" \
+          '{ts:$ts,campaign:"bug-hunt",key:$key,session_id:(if $sid=="" then null else $sid end),worktree:$wt,outcome:"retained",retain_until:$ru,detail:$et}' \
+          >> "${config.worktree_base}/cleanup-ledger.jsonl"
+        echo "audit failed for slice $SLICE (${event.type}) — session retained 7d" >&2
+        exit 0
+      emit:
+        "0": "bug-hunt.run.failed"
+      timeout: 60
+
+  # --- fix.pick: next eligible finding → current-finding.json ---------
+  # Fires on findings.ready (first pick) and on every fixdone (loop).
+  # Eligibility: status pending, OR picked-by-a-different-run (a dead
+  # run's in-flight finding becomes eligible again). Exhausted
+  # pendings (attempts >= max) are failed here. Per-run cap counts
+  # findings stamped with this run's token.
+  - id: bug-hunt.fix.pick
+    driver: shell
+    on:
+      - bug-hunt.findings.ready
+      - bug-hunt.fixdone
+    emits:
+      - bug-hunt.fixgo
+      - bug-hunt.fixdeferred
+      - bug-hunt.slicedone
+      - bug-hunt.run.failed
+    max_fires: unlimited
+    params:
+      cmd: |
+        set -euo pipefail
+        WB="${config.worktree_base}"
+        SLICE=$(cat "$WB/current-slice")
+        LEDGER="$WB/slices/$SLICE.findings.json"
+        TOKEN=$(cat "$WB/run-token")
+        # One fix pipeline at a time — fix-current is a single
+        # worktree. A second trigger (backlog + audit.gate both emit
+        # findings.ready) defers; the in-flight fixdone re-fires pick.
+        LOCK="$WB/fix.lock"
+        ACQUIRED=0
+        if mkdir "$LOCK" 2>/dev/null; then ACQUIRED=1; else
+          echo "fix already in flight — deferring" >&2; exit 3
+        fi
+        # Lock is held from fixgo until fix.cleanup releases it; every
+        # non-zero exit here (incl. slicedone rc4) frees it.
+        trap 'rc=$?; if [ "$ACQUIRED" = 1 ] && [ "$rc" -ne 0 ]; then rmdir "$LOCK" 2>/dev/null || true; fi' EXIT
+        [ -f "$LEDGER" ] || { echo "no findings ledger for $SLICE" >&2; exit 1; }
+        # Fail pendings that exhausted their attempt budget.
+        jq --argjson maxa "${config.max_fix_attempts}" '
+          .findings |= map(if .status == "pending" and (.attempts // 0) >= $maxa
+                           then .status = "failed" | . + {last_error:"attempts exhausted"}
+                           else . end)' "$LEDGER" > "$LEDGER.tmp" && mv "$LEDGER.tmp" "$LEDGER"
+        DONE_RUN=$(jq --arg t "$TOKEN" '[.findings[] | select(.run == $t)] | length' "$LEDGER")
+        if [ "$DONE_RUN" -ge "${config.max_fixes_per_run}" ]; then
+          echo "run cap ${config.max_fixes_per_run} reached for slice $SLICE" >&2
+          exit 4
+        fi
+        # Pick the first eligible finding (array order = severity sort
+        # from the gate merge).
+        SEL=$(jq -c --arg t "$TOKEN" '
+          [.findings | to_entries[]
+           | select((.value.status == "pending")
+                    or (.value.status == "picked" and .value.run != $t))]
+          | .[0] // empty | {idx: .key, fkey: .value.key, finding: .value}' "$LEDGER")
+        if [ -z "$SEL" ]; then
+          echo "no eligible findings left for slice $SLICE" >&2
+          exit 4
+        fi
+        IDX=$(printf '%s' "$SEL" | jq -r '.idx')
+        FKEY=$(printf '%s' "$SEL" | jq -r '.fkey')
+        # Mark picked + stamp run token + bump attempts — addressed by
+        # stable key: audit.gate re-sorts the array, so indices drift.
+        jq --arg k "$FKEY" --arg t "$TOKEN" '
+          .findings |= map(if .key == $k
+                           then .status = "picked" | .run = $t |
+                                .attempts = ((.attempts // 0) + 1)
+                           else . end)' \
+          "$LEDGER" > "$LEDGER.tmp" && mv "$LEDGER.tmp" "$LEDGER"
+        FINDING=$(printf '%s' "$SEL" | jq -c '.finding')
+        SLUG=$(printf '%s' "$FINDING" | jq -r '.title' | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9]/-/g' | tr -s '-' | sed 's/^-//;s/-$//' | cut -c1-40)
+        BRANCH="bug-hunt/$SLICE/$IDX-${SLUG:-fix}"
+        jq -nc --arg slice "$SLICE" --argjson idx "$IDX" --arg fkey "$FKEY" --arg branch "$BRANCH" \
+          --arg token "$TOKEN" --argjson f "$FINDING" \
+          '$f + {slice:$slice, idx:$idx, key:$fkey, branch:$branch, run:$token}' \
+          > "$WB/current-finding.json"
+        echo "fix.pick: slice=$SLICE idx=$IDX branch=$BRANCH — $(printf '%s' "$FINDING" | jq -r '.title')" >&2
+      emit:
+        "0": "bug-hunt.fixgo"
+        "3": "bug-hunt.fixdeferred"
+        "4": "bug-hunt.slicedone"
+        default: "bug-hunt.run.failed"
+      timeout: 60
+
+  # --- fix worktree: remove stale → add at base_ref --------------------
+  - id: bug-hunt.fix.wt.rm
+    driver: ops
+    on:
+      - bug-hunt.fixgo
+    emits:
+      - bug-hunt.fix.wt.removed
+    max_fires: unlimited
+    params:
+      driver: lasius
+      query: cli.vcs.worktree.remove
+      params:
+        root: "${config.lasius_root}"
+        repo: "${config.checkout}"
+        dir: "${config.worktree_base}/fix-current"
+        json: true
+      emit:
+        success: "bug-hunt.fix.wt.removed"
+        failure: "bug-hunt.fix.wt.removed"
+      timeout: 60
+
+  - id: bug-hunt.fix.wt.add
+    driver: ops
+    on:
+      - bug-hunt.fix.wt.removed
+    emits:
+      - bug-hunt.fix.ready
+      - bug-hunt.fix.worktree.failed
+    max_fires: unlimited
+    params:
+      driver: lasius
+      query: cli.vcs.worktree.add
+      params:
+        root: "${config.lasius_root}"
+        repo: "${config.checkout}"
+        dir: "${config.worktree_base}/fix-current"
+        rev: "${config.base_ref}"
+        json: true
+      emit:
+        success: "bug-hunt.fix.ready"
+        failure: "bug-hunt.fix.worktree.failed"
+      timeout: 120
+
+  # --- fix: prompt assembly (single finding from current-finding.json) -
+  - id: bug-hunt.fix.prompt
+    driver: shell
+    on:
+      - bug-hunt.fix.ready
+    emits:
+      - bug-hunt.fix.prompt.ready
+      - bug-hunt.fix.failed
+    max_fires: unlimited
+    params:
+      cmd: |
+        set -euo pipefail
+        WB="${config.worktree_base}"
+        CUR="$WB/current-finding.json"
+        [ -f "$CUR" ] || { echo "no current-finding.json" >&2; exit 1; }
+        jq -nr \
+          --argjson f "$(cat "$CUR")" \
+          --arg verify "${config.verify_cmd}" \
+          '"Fix exactly ONE bug in this repository.\n\n" +
+           "FINDING (JSON):\n\($f | tojson)\n\n" +
+           "Rules:\n" +
+           "1. Read AGENTS.md and follow repo conventions (Effect services behind ports, arch boundaries, English, no diagnosis/treatment copy).\n" +
+           "2. Apply the MINIMAL correct fix — no drive-by refactors, no churn.\n" +
+           "3. Add or update a regression test that fails without the fix when practical.\n" +
+           "4. You may sanity-check with `bun install` and scoped tests, but the campaign runs the authoritative verify (\($verify) + package vitest) after you finish — do not obsess over the full suite.\n" +
+           "5. When done, write the repo-relative paths of EVERY file you created or modified (one per line, no .bughunt/ entries) to .bughunt/changed.txt.\n" +
+           "6. Do NOT commit, push, branch, or open a PR — leave changes in the working tree; the campaign ships them.\n" +
+           "7. If the finding is not actually a bug or cannot be fixed safely, change NOTHING and write an empty .bughunt/changed.txt — an honest no-op is a valid outcome."'
+        echo "fix prompt assembled for $(jq -r '.branch' "$CUR")" >&2
+      emit:
+        "0": "bug-hunt.fix.prompt.ready"
+        default: "bug-hunt.fix.failed"
+      timeout: 60
+
+  # --- fix: sepia agent session ----------------------------------------
+  - id: bug-hunt.fix.run
+    driver: ops
+    on:
+      - bug-hunt.fix.prompt.ready
+    emits:
+      - bug-hunt.fix.turn
+      - bug-hunt.fix.failed
+    max_fires: unlimited
+    retry:
+      max_attempts: 2
+      delay: 5000
+      backoff: fixed
+    params:
+      driver: sepia
+      query: sessions.run
+      env:
+        SEPIA_AGENT_DEVIN_COMMAND: "/home/luis/.local/bin/sepia-agent-sandbox devin acp"
+      params:
+        cwd: "${config.worktree_base}/fix-current"
+        agent: "${config.agent}"
+        title: "bug-hunt fix"
+        mode: "${config.agent_mode}"
+        text: "${event.payload.stdout}"
+        timeoutMs: 1740000
+      emit:
+        success: "bug-hunt.fix.turn"
+        failure: "bug-hunt.fix.failed"
+      timeout: 1900
+
+  # --- fix: turn gate + dirty-tree check --------------------------------
+  # `git status --porcelain` is the one raw-git call in the bundle —
+  # lasius exposes no worktree-status verb; it is read-only. .bughunt/
+  # is excluded: the agent's own bookkeeping must not count as a diff.
+  - id: bug-hunt.fix.gate
+    driver: shell
+    on:
+      - bug-hunt.fix.turn
+    emits:
+      - bug-hunt.verify.go
+      - bug-hunt.fix.nodiff
+      - bug-hunt.fix.failed
+    max_fires: unlimited
+    params:
+      cmd: |
+        set -uo pipefail
+        WB="${config.worktree_base}"
+        WT="$WB/fix-current"
+        mkdir -p "$WB/sessions"
+        printf '%s' '${event.payload.result.data.id}' > "$WB/sessions/fix"
+        SR='${event.payload.result.data.stopReason}'
+        TO='${event.payload.result.data.timedOut}'
+        echo "fix turn: stopReason=${SR:-<none>} timedOut=${TO:-false}" >&2
+        [ "$TO" = "true" ] && exit 1
+        case "$SR" in end_turn|cancelled) ;; *) exit 1 ;; esac
+        DIRTY=$(git -C "$WT" status --porcelain | grep -v '^?? \.bughunt/' | head -1 || true)
+        if [ -z "$DIRTY" ]; then
+          echo "agent left no source changes — honest no-op" >&2
+          exit 3
+        fi
+        exit 0
+      emit:
+        "0": "bug-hunt.verify.go"
+        "3": "bug-hunt.fix.nodiff"
+        default: "bug-hunt.fix.failed"
+      timeout: 30
+
+  # --- verify: install + scoped check + package tests + e2e ------------
+  - id: bug-hunt.verify
+    driver: shell
+    on:
+      - bug-hunt.verify.go
+    emits:
+      - bug-hunt.verify.ok
+      - bug-hunt.verify.failed
+    max_fires: unlimited
+    params:
+      cmd: |
+        set -euo pipefail
+        WB="${config.worktree_base}"
+        WT="$WB/fix-current"
+        CUR="$WB/current-finding.json"
+        cd "$WT"
+        bun install --frozen-lockfile
+        # Changed files: agent-reported list, falling back to the
+        # finding's own path. Repo-relative, must exist.
+        if [ -f .bughunt/changed.txt ]; then
+          FILES=$(grep -v '^\.bughunt/' .bughunt/changed.txt | sed '/^$/d' | while read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done)
+        else
+          FILES=$(jq -r '.path // empty' "$CUR" | while read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done)
+        fi
+        [ -n "$FILES" ] || FILES=$(git -C "$WT" status --porcelain | awk '{print $2}' | grep -v '^\.bughunt/' | head -20)
+        echo "verify files: $FILES" >&2
+        # Auto-format the agent's touched files first — the repo's fmt
+        # gate is mechanical and agents routinely leave unformatted
+        # output; formatting in place is what CI would demand anyway.
+        # shellcheck disable=SC2086
+        bunx vp fmt $FILES
+        # Scoped fmt+lint+typecheck on the touched files — verify_cmd
+        # is a command PREFIX that receives the file list as args
+        # (default `bunx vp check` → `vp check <files>`).
+        # shellcheck disable=SC2086
+        ${config.verify_cmd} $FILES
+        # Package-scoped vitest for every touched package dir.
+        PKGS=$(printf '%s\n' "$FILES" | awk -F/ 'NF>=2 {print $1"/"$2}' | sort -u)
+        for d in $PKGS; do
+          if [ -f "$d/vitest.config.ts" ] || [ -f "$d/vitest.config.mts" ]; then
+            echo "verify: vitest in $d" >&2
+            (cd "$d" && bunx vitest run)
+          fi
+        done
+        # E2E when the diff touches UI surfaces.
+        E2E=0
+        if [ "${config.e2e_mode}" = "always" ]; then E2E=1; fi
+        if [ "${config.e2e_mode}" = "auto" ]; then
+          PREFIXES=$(printf '%s' "${config.e2e_path_prefixes}" | tr ',' '\n')
+          while IFS= read -r f; do
+            while IFS= read -r p; do
+              case "$f" in "$p"|"$p"/*) E2E=1 ;; esac
+            done <<< "$PREFIXES"
+          done <<< "$FILES"
+        fi
+        if [ "$E2E" = "1" ]; then
+          echo "verify: e2e (${config.e2e_cmd})" >&2
+          (cd apps/web && ${config.e2e_cmd})
+        fi
+        echo "verify ok" >&2
+      emit:
+        "0": "bug-hunt.verify.ok"
+        default: "bug-hunt.verify.failed"
+      timeout: 7000
+
+  # --- commit (shell: message comes from current-finding.json) ----------
+  - id: bug-hunt.commit
+    driver: shell
+    on:
+      - bug-hunt.verify.ok
+    emits:
+      - bug-hunt.committed
+      - bug-hunt.fix.commitfailed
+    max_fires: unlimited
+    params:
+      cmd: |
+        set -euo pipefail
+        WB="${config.worktree_base}"
+        WT="$WB/fix-current"
+        CUR="$WB/current-finding.json"
+        TITLE=$(jq -r '.title' "$CUR")
+        DETAIL=$(jq -r '"path: \(.path):\(.line // "?")\n\n\(.detail)\n\nRepro: \(.repro // "n/a")"' "$CUR")
+        # .bughunt/ is agent bookkeeping — never ship it.
+        rm -rf "$WT/.bughunt"
+        lasius --root "${config.lasius_root}" vcs commit "$WT" \
+          -m "bug-hunt: $TITLE" --body "$DETAIL" --json
+      emit:
+        "0": "bug-hunt.committed"
+        default: "bug-hunt.fix.commitfailed"
+      timeout: 120
+
+  # --- push HEAD to the finding's bug-hunt branch -----------------------
+  - id: bug-hunt.push
+    driver: shell
+    on:
+      - bug-hunt.committed
+    emits:
+      - bug-hunt.pushed
+      - bug-hunt.push.failed
+    max_fires: unlimited
+    params:
+      cmd: |
+        set -euo pipefail
+        WB="${config.worktree_base}"
+        WT="$WB/fix-current"
+        BRANCH=$(jq -r '.branch' "$WB/current-finding.json")
+        lasius --root "${config.lasius_root}" vcs push "$WT" \
+          --branch "HEAD:refs/heads/$BRANCH" --json
+      emit:
+        "0": "bug-hunt.pushed"
+        default: "bug-hunt.push.failed"
+      timeout: 120
+
+  # --- ship: forge pr create + mark finding shipped ---------------------
+  - id: bug-hunt.ship
+    driver: shell
+    on:
+      - bug-hunt.pushed
+    emits:
+      - bug-hunt.pr.opened
+      - bug-hunt.pr.failed
+    max_fires: unlimited
+    params:
+      env:
+        GH_TOKEN: "${secret.GITHUB_TOKEN}"
+      cmd: |
+        set -euo pipefail
+        WB="${config.worktree_base}"
+        CUR="$WB/current-finding.json"
+        LEDGER="$WB/slices/$(jq -r '.slice' "$CUR").findings.json"
+        SLICE=$(jq -r '.slice' "$CUR")
+        IDX=$(jq -r '.idx' "$CUR")
+        BRANCH=$(jq -r '.branch' "$CUR")
+        TITLE=$(jq -r '"bug-hunt: " + .title' "$CUR")
+        BODY=$(jq -rn \
+          --arg sev "$(jq -r '.severity' "$CUR")" \
+          --arg path "$(jq -r '.path' "$CUR")" \
+          --arg line "$(jq -r '.line // "?"' "$CUR")" \
+          --arg detail "$(jq -r '.detail' "$CUR")" \
+          --arg repro "$(jq -r '.repro // "n/a"' "$CUR")" \
+          --arg fix "$(jq -r '.suggested_fix // "n/a"' "$CUR")" \
+          --arg slice "$SLICE" \
+          --arg idx "$IDX" \
+          '"Found by the bug-hunt campaign.\n\n" +
+           "- **Severity:** \($sev)\n- **Location:** `\($path):\($line)`\n\n" +
+           $detail + "\n\n**Repro:** " + $repro +
+           "\n\n**Suggested fix:** " + $fix +
+           "\n\nSlice: " + $slice + " — finding #" + $idx +
+           ". Verify passed in the fix worktree before this PR."')
+        OUT=$(lasius --root "${config.lasius_root}" forge pr create "${config.checkout}" \
+          --title "$TITLE" --body "$BODY" \
+          --base "${config.base_ref}" --head "$BRANCH" --json)
+        PRNUM=$(printf '%s' "$OUT" | jq -r '.number // .url // empty' 2>/dev/null || true)
+        FKEY=$(jq -r '.key // empty' "$CUR")
+        jq --arg k "$FKEY" --arg pr "$PRNUM" --arg br "$BRANCH" '
+          .findings |= map(if .key == $k
+                           then .status = "shipped" | .pr = $pr | .branch = $br
+                           else . end)' "$LEDGER" > "$LEDGER.tmp" && mv "$LEDGER.tmp" "$LEDGER"
+        echo "PR opened: $PRNUM ($BRANCH)" >&2
+      emit:
+        "0": "bug-hunt.pr.opened"
+        default: "bug-hunt.pr.failed"
+      timeout: 120
+
+  # --- fix.cleanup: every per-finding terminal --------------------------
+  # Marks non-shipped findings failed (attempts were counted at pick),
+  # removes the fix worktree, deletes the session on shipped paths /
+  # retains 7d otherwise, ledgers everything, then re-emits fixdone
+  # so fix.pick continues the loop.
+  - id: bug-hunt.fix.cleanup
+    driver: shell
+    on:
+      - bug-hunt.pr.opened
+      - bug-hunt.pr.failed
+      - bug-hunt.fix.failed
+      - bug-hunt.fix.nodiff
+      - bug-hunt.fix.commitfailed
+      - bug-hunt.push.failed
+      - bug-hunt.verify.failed
+      - bug-hunt.fix.worktree.failed
+    emits:
+      - bug-hunt.fixdone
+    max_fires: unlimited
+    params:
+      cmd: |
+        set -uo pipefail
+        WB="${config.worktree_base}"
+        WT="$WB/fix-current"
+        CUR="$WB/current-finding.json"
+        ET="${event.type}"
+        # Mark the finding failed unless ship already marked it.
+        if [ -f "$CUR" ]; then
+          SLICE=$(jq -r '.slice' "$CUR")
+          FKEY=$(jq -r '.key // empty' "$CUR")
+          IDX=$(jq -r '.idx' "$CUR")
+          LEDGER="$WB/slices/$SLICE.findings.json"
+          if [ -n "$FKEY" ] && [ -f "$LEDGER" ]; then
+            jq --arg k "$FKEY" --arg et "$ET" '
+              .findings |= map(if .key == $k and .status != "shipped"
+                               then .status = "failed" | .last_error = $et
+                               else . end)' "$LEDGER" > "$LEDGER.tmp" \
+              && mv "$LEDGER.tmp" "$LEDGER" || true
+          fi
+        fi
+        lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WT" --json >/dev/null 2>&1 || true
+        SID=$(cat "$WB/sessions/fix" 2>/dev/null || true)
+        case "$ET" in
+          *pr.opened*) MODE=delete ;;
+          *) MODE=retain ;;
+        esac
+        if [ "$MODE" = "delete" ]; then
+          OUTCOME=failed; DETAIL="no session id recorded"
+          if [ -n "$SID" ]; then
+            if sepia delete "$SID" --from "${config.agent}" >/dev/null 2>&1; then OUTCOME=deleted; DETAIL=""; else DETAIL="sepia delete failed"; fi
+          elif devin-gc --cwd "$WT" --apply >/dev/null 2>&1; then
+            OUTCOME=deleted-cwd; DETAIL="no session id; cwd sweep"
+          fi
+        else
+          OUTCOME=retained; DETAIL=""
+        fi
+        RETAIN_UNTIL=null
+        [ "$MODE" = "retain" ] && RETAIN_UNTIL=$(( $(date +%s) + 604800 ))
+        jq -nc --argjson ts "$(date +%s)" --arg key "fix" --arg sid "$SID" \
+          --arg wt "$WT" --arg oc "$OUTCOME" --arg d "$DETAIL" --arg et "$ET" \
+          --argjson ru "$RETAIN_UNTIL" \
+          '{ts:$ts,campaign:"bug-hunt",key:$key,session_id:(if $sid=="" then null else $sid end),worktree:$wt,outcome:$oc,retain_until:$ru,detail:$et}' \
+          >> "$WB/cleanup-ledger.jsonl"
+        rm -f "$WB/sessions/fix"
+        rmdir "$WB/fix.lock" 2>/dev/null || true
+        echo "fix cleanup (${ET}) — session $OUTCOME" >&2
+        exit 0
+      emit:
+        "0": "bug-hunt.fixdone"
+      timeout: 60
+
+  # --- finish: slice fully processed -----------------------------------
+  # findings.none reaches here via auditfin (which already stamped +
+  # cleaned); slicedone arrives from fix.pick when the backlog is
+  # exhausted. Idempotent: stamp again, best-effort audit worktree +
+  # session sweep (may already be gone), then run.done.
+  - id: bug-hunt.finish
+    driver: shell
+    on:
+      - bug-hunt.slicedone
+    emits:
+      - bug-hunt.run.done
+    max_fires: 1
+    params:
+      cmd: |
+        set -uo pipefail
+        WB="${config.worktree_base}"
+        SLICE=$(cat "$WB/current-slice" 2>/dev/null || echo unknown)
+        touch "$WB/audited/$SLICE" 2>/dev/null || true
+        lasius --root "${config.lasius_root}" vcs worktree remove "${config.checkout}" --dir "$WB/audit-current" --json >/dev/null 2>&1 || true
+        SID=$(cat "$WB/sessions/audit" 2>/dev/null || true)
+        if [ -n "$SID" ]; then
+          sepia delete "$SID" --from "${config.agent}" >/dev/null 2>&1 || true
+        fi
+        rm -f "$WB/sessions/audit"
+        echo "slice $SLICE done" >&2
+        exit 0
+      emit:
+        "0": "bug-hunt.run.done"
+      timeout: 60

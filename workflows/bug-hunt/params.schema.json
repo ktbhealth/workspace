@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "bug-hunt params",
+  "type": "object",
+  "properties": {
+    "checkout": {
+      "type": "string",
+      "description": "Local clone path lasius operates on \u2014 REQUIRED per deployment (e.g. repos/product).",
+      "default": ""
+    },
+    "lasius_root": {
+      "type": "string",
+      "description": "lasius workspace root (--root); repo args are checkout paths so any lasius.toml workspace works.",
+      "default": "/home/luis/GitHub/ktbhealth"
+    },
+    "base_ref": {
+      "type": "string",
+      "description": "Base ref audit/fix worktrees are cut from and PRs target.",
+      "default": "main"
+    },
+    "worktree_base": {
+      "type": "string",
+      "description": "State + worktree root \u2014 MUST be absolute (ops params get no shell $HOME expansion). Holds cursor, audited/ stamps, slices/*.findings.json ledgers, current-slice, current-finding.json, run-token, sessions/, cleanup-ledger.jsonl, audit-current/ and fix-current/ worktrees.",
+      "default": "/home/luis/.local/share/bug-hunt/worktrees"
+    },
+    "agent": {
+      "type": "string",
+      "description": "sepia agent-config id for audit/fix sessions.",
+      "default": "devin"
+    },
+    "agent_mode": {
+      "type": "string",
+      "description": "ACP session mode applied after create \u2014 REQUIRED for unattended runs ('bypass' auto-approves all tools; 'smart' is the safer middle ground).",
+      "default": "bypass"
+    },
+    "slices": {
+      "type": "string",
+      "description": "Slice manifest: 'id=path1,path2;id2=...' \u2014 repo-relative path prefixes the audit agent scopes to. Round-robin via cursor file; override per deployment or per run via `campaign submit --config`.",
+      "default": ""
+    },
+    "rescan_days": {
+      "type": "integer",
+      "description": "A slice whose audited stamp is younger than this many days is skipped by the picker (0 = always eligible).",
+      "default": 1
+    },
+    "max_findings_per_slice": {
+      "type": "integer",
+      "description": "Cap on findings kept per slice ledger \u2014 resolved entries always kept; pending fill remaining slots severity-sorted.",
+      "default": 10
+    },
+    "max_fix_attempts": {
+      "type": "integer",
+      "description": "Per-finding fix attempts across ALL runs \u2014 durable in the slice findings ledger; exhausted findings are marked failed.",
+      "default": 2
+    },
+    "max_fixes_per_run": {
+      "type": "integer",
+      "description": "Per-run cap on findings processed \u2014 bounds one manual run's agent+verify cost.",
+      "default": 5
+    },
+    "verify_cmd": {
+      "type": "string",
+      "description": "Verification command run in the fix worktree after bun install \u2014 appended to the agent-reported changed-file list as `bunx vp check <files>`-style scoped args is NOT automatic: this is the base command; the node runs `<verify_cmd> <changed files>`.",
+      "default": "bunx vp check"
+    },
+    "e2e_mode": {
+      "type": "string",
+      "description": "auto = run e2e only when changed files match e2e_path_prefixes; always; never.",
+      "default": "auto"
+    },
+    "e2e_path_prefixes": {
+      "type": "string",
+      "description": "Comma-separated repo-relative prefixes that trigger e2e under e2e_mode=auto.",
+      "default": "apps/web/src/routes,apps/web/src/components,apps/web/src/router.tsx,apps/web/src/server.ts,apps/web/src/start.ts,apps/web/src/plugins.ts"
+    },
+    "e2e_cmd": {
+      "type": "string",
+      "description": "E2E command run from apps/web when triggered (playwright config starts its own dev server).",
+      "default": "bun run test:e2e"
+    }
+  },
+  "additionalProperties": true
+}

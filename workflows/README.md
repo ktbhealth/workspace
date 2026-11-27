@@ -7,6 +7,7 @@ automation (agent sessions, CI gates, forge ops) installed via tamias.
 | -------------------------- | -------------------------------------------------------------------------------------------- |
 | [`pr-review/`](pr-review/) | PR opened/updated → sepia agent reviews + adjusts → verified-green checks → squash merge     |
 | [`deploy/`](deploy/)       | push to deploy ref → worktree deploy → cooldown throttle (one deploy per service per window) |
+| [`bug-hunt/`](bug-hunt/)   | Manual slice sweep → audit agent finds bugs → verified per-finding fix → PR per bug          |
 
 ## Bundle anatomy
 

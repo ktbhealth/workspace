@@ -1,0 +1,41 @@
+# bug-hunt — manual slice audit → verified per-finding fix → PR.
+# Tamias bundle (`type: peregrin-bundle`); ktbhealth counterpart of a
+# scheduled bug sweep, using the same driver boundaries as pr-review:
+# lasius owns git/forge, sepia owns agent sessions (sessions.run ops),
+# peregrin owns event routing, tamias distributes.
+#
+# Trigger: manual only — `peregrin campaign run|submit`. No webhook
+# ingress; the engine `start` event kicks the slice picker.
+name: bug-hunt
+version: 0.1.0
+type: peregrin-bundle
+description: >-
+  One slice per run: sepia audit agent finds real bugs, then per
+  finding a fix agent applies a minimal fix gated by scoped verify
+  (vp check + package vitest + optional playwright e2e) before a
+  bug-hunt/* branch is pushed and a PR opened for pr-review to
+  merge. Durable findings ledger dedupes across runs.
+
+provider:
+  # SHARED provider identity — same as every peregrin-bundle: all
+  # bundles render services into the ONE peregrin-campaign.service.
+  # Keep `exec` identical to pr-review's.
+  name: peregrin
+  services:
+    - name: campaign
+      exec: >-
+        ~/.local/bin/peregrin campaign serve ~/.config/peregrin/serve
+        --listen 127.0.0.1:29173 --path /hook
+        --history-dir ~/.local/share/peregrin/serve-history
+        --queue-store-dir ~/.local/share/peregrin/serve-queues
+      env_file: "~/.config/peregrin/env"
+      workdir: "~"
+      restart: on-failure
+  ingress:
+    # No webhook — manual trigger only. Advisory block kept for shape
+    # parity with pr-review; hooks[] stays empty.
+    - public_url: https://tamias.luisfuturist.com
+      listen: 127.0.0.1:29173
+      path: /hook
+      hooks: []
+  verbs: [run, logs]
