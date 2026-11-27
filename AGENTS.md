@@ -17,7 +17,7 @@ read it before working inside.
 | `repos/docs`               | Documentation site — Fumadocs on TanStack Start, audience tabs (doctors/patients/developers/business), Cloudflare Workers via Alchemy. |
 | `repos/website-draft`      | Marketing site — TanStack Start SSR on Cloudflare, Paraglide i18n (en/pt-BR/es).                                                       |
 | `repos/presentation-draft` | Slidev deck for the HackBrasil talk (pt-BR).                                                                                           |
-| `repos/presentation-demo`  | Slidev deck for the HackBrasil demo/final presentation (pt-BR), forked from `presentation-draft`.                                       |
+| `repos/presentation-demo`  | Slidev deck for the HackBrasil demo/final presentation (pt-BR), forked from `presentation-draft`.                                      |
 | `repos/slidev-theme-ktb`   | `@ktbhealth/slidev-theme-ktb` — Slidev theme matching product design tokens.                                                           |
 | `repos/.github`            | Org profile README + community health files.                                                                                           |
 

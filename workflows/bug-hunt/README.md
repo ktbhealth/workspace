@@ -64,16 +64,16 @@ Each run processes **one slice** (audit + up to
 
 ## State (under `worktree_base`, default `~/.local/share/bug-hunt/worktrees`)
 
-| path | what |
-| ---- | ---- |
-| `cursor` | last picked slice id (round-robin position) |
+| path                                     | what                                                    |
+| ---------------------------------------- | ------------------------------------------------------- |
+| `cursor`                                 | last picked slice id (round-robin position)             |
 | `current-slice` / `current-finding.json` | in-flight slice / finding (branch, attempts, run token) |
-| `run-token` | per-run id bounding `max_fixes_per_run` |
-| `audited/<slice>` | stamp file — mtime drives `rescan_days` skip |
-| `slices/<slice>.findings.json` | durable findings ledger (dedupe, status, attempts, pr#) |
-| `audit-current/`, `fix-current/` | disposable worktrees at `base_ref` |
-| `sessions/{audit,fix}` | sepia session ids for cleanup |
-| `cleanup-ledger.jsonl` | session/worktree cleanup outcomes (reconcile retries) |
+| `run-token`                              | per-run id bounding `max_fixes_per_run`                 |
+| `audited/<slice>`                        | stamp file — mtime drives `rescan_days` skip            |
+| `slices/<slice>.findings.json`           | durable findings ledger (dedupe, status, attempts, pr#) |
+| `audit-current/`, `fix-current/`         | disposable worktrees at `base_ref`                      |
+| `sessions/{audit,fix}`                   | sepia session ids for cleanup                           |
+| `cleanup-ledger.jsonl`                   | session/worktree cleanup outcomes (reconcile retries)   |
 
 Finding statuses: `pending` → `picked` (attempts++) → `shipped`
 (PR opened) or `failed` (attempts exhausted → terminal). A `picked`
@@ -130,7 +130,7 @@ Only then: `lasius vcs commit` → `vcs push HEAD:refs/heads/<branch>`
   pick time; a moved base surfaces as a PR conflict for pr-review's
   `merge.conflict` path, not silent corruption.
 - **`bun run check` on the whole repo can OOM** on memory-tight
-  hosts (tsgolint) — that's why verify is *scoped* to changed files
+  hosts (tsgolint) — that's why verify is _scoped_ to changed files
   and `verify_cmd` is configurable.
 - **Sessions bypass the peregrin node registry** — same caveat as
   pr-review (sepia plane, `sepia list` to inspect).

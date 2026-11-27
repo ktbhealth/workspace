@@ -46,6 +46,15 @@ vars). That is sufficient because:
 - `cuora run` resolves secrets through the host's tardigrada
   identity (`~/.config/cuora`) — `HOME` is passed, no
   `CUORA_CF_TOKEN` needed (verified with `cuora check`).
+  Headless gotcha: cuora's default identity backend is the OS
+  keyring (secret-service over D-Bus), which the sanitized env
+  cannot reach — the run dies with `identity backend unavailable`
+  before alchemy starts. Prefix the deploy command with
+  `CUORA_IDENTITY_BACKEND=file` (file backend, `actor: anon` —
+  vault refs still resolve) or export `DBUS_SESSION_BUS_ADDRESS`
+  in the node env. The ktbhealth serve files carry the prefix in
+  `deploy_cmd` (e.g. `bun run build && CUORA_IDENTITY_BACKEND=file
+  bun run deploy`).
 - `alchemy deploy` authenticates through its local profile under
   `$HOME` — same as a manual `bun run deploy`.
 - `bun`/`cuora`/`lasius` are prepended onto `PATH` inside the run
