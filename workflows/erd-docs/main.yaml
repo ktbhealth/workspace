@@ -1,0 +1,212 @@
+# erd-docs — pull_request → regenerate plugin ERD docs → push a
+# same-named branch to ktbhealth/docs.
+#
+# Producer side of the product repo's `erd` CI check: that job clones
+# the docs repo, runs `bun run db:erd:check`, and FAILS when the
+# committed docs are stale — and it already looks for a docs branch
+# matching the PR's head_ref. This campaign is what creates that
+# branch, so schema-changing PRs go green without a human running
+# `bun run db:erd` by hand.
+#
+# Flow:
+#   pull_request (opened|synchronize|reopened|ready_for_review) ──►
+#   guard (repo match, fork skip, run-state file per sha) ──►
+#   regen (fresh product@PR-head + docs clones under worktree_base →
+#   bun install → bun run db:erd → commit+push docs branch when the
+#   tree changed) ──► erd-docs.pushed|clean|failed.<sha>
+#
+# Boundaries: this bundle deliberately uses `driver: shell` end to
+# end — no lasius, no sepia. The work is one deterministic script
+# (clone → install → generate → push); agent sessions would add cost
+# and nondeterminism for zero benefit. The docs push is a raw
+# `git push` because `lasius forge` exposes only PR/status verbs —
+# there is no docs-branch verb to route through (same exception class
+# as bug-hunt's read-only `git -C` plumbing, except this one mutates:
+# it is the bundle's whole purpose, scoped to a throwaway clone).
+#
+# Auth: the GitHub webhook HMAC comes from config.webhook_secret_env
+# (BUPHA_WH_* convention). The docs push authenticates with
+# ${secret.GITHUB_TOKEN} via http.extraHeader — the token needs
+# contents:write on ktbhealth/docs (same secret pr-review uses for
+# forge ops; if it is product-repo-scoped only, mint a docs-capable
+# one — see README).
+name: erd-docs
+
+annotations:
+  title: ERD docs — regenerate + push docs branch on PRs
+  description: >-
+    React to pull_request deliveries on the product repo: clone the
+    PR head + docs repo, run `bun run db:erd`, and push the result to
+    a same-named branch on ktbhealth/docs so the `erd` CI check finds
+    fresh pages. Fork PRs skipped; no-op when docs are unchanged.
+  author: ktbhealth
+  tags: [docs, erd, drizzle, workflow]
+  since: "0.1.0"
+
+config:
+  # Watched repo as owner/name — REQUIRED per deployment.
+  repo: ""
+  # Env var holding this repo's webhook HMAC secret — the
+  # BUPHA_WH_<OWNER>_<REPO> convention. REQUIRED.
+  webhook_secret_env: ""
+  # Per-sha run state (run-<sha>/pr.txt) lands here and is kept for
+  # debugging; throwaway clones (wt-<sha>/) are always removed.
+  # MUST be absolute —
+  # ops/shell params get no $HOME expansion in some paths, so the
+  # default is spelled out.
+  worktree_base: "/home/luis/.local/share/erd-docs/worktrees"
+  # Docs repo clone URL (https — pushed via GITHUB_TOKEN header, no
+  # ssh-agent needed inside the service).
+  docs_repo_url: "https://github.com/ktbhealth/docs.git"
+  # Product repo URL for the fresh clone (https; public-read is fine,
+  # PR refs are fetched explicitly).
+  product_repo_url: "https://github.com/ktbhealth/product.git"
+  # bun binary dir prepended to PATH inside regen (systemd services
+  # get a minimal PATH).
+  bun_bin: "$HOME/.bun/bin"
+
+capabilities:
+  secrets:
+    - BUPHA_WH_*
+    # gh/lasius forge token — reused for the docs push via
+    # http.extraHeader. Needs contents:write on ktbhealth/docs.
+    - GITHUB_TOKEN
+
+# No `events:` block — subscribed types are emitted by the
+# github-webhook driver itself.
+
+# One regen per sha+PR; latest-wins collapses synchronize bursts.
+# cancel_running stays false — an in-flight regen must finish or the
+# docs branch ends up half-pushed (the push itself is atomic per
+# branch, but a killed clone leaves the next run to redo everything).
+supersede:
+  key: "{sha}:{number}"
+  mode: latest-wins
+  cancel_running: false
+
+nodes:
+  # --- ingress: verified pull_request deliveries for the watched repo -
+  - id: erd-docs.ingress
+    driver: github-webhook
+    on:
+      - start
+    emits:
+      - erd-docs.ingress.listening
+      - pull_request
+    params:
+      listen: 127.0.0.1:29174
+      path: /hook
+      repos:
+        - name: "${config.repo}"
+          secret_env: "${config.webhook_secret_env}"
+      # Drafts included deliberately: the `erd` check runs on drafts
+      # too, and regenerating early means ready_for_review arrives
+      # with docs already fresh. synchronize covers every new head.
+      pull_request_actions: [opened, synchronize, reopened, ready_for_review]
+
+  # --- guard: repo/fork policy + per-sha run state --------------------
+  # The payload carries number/sha/ref(head branch)/base_ref. Fork
+  # heads are skipped — the fresh clone fetches `pull/<n>/head`,
+  # which works for forks too actually, but a fork PR's docs branch
+  # would be pushed under OUR head_ref name containing `user:branch`
+  # — skipped anyway: docs branches mirror trusted-repo refs only.
+  - id: erd-docs.guard
+    driver: shell
+    on:
+      - pull_request
+    emits:
+      - erd-docs.ready.*
+      - erd-docs.skipped.*
+      - erd-docs.failed.*
+    max_fires: unlimited
+    params:
+      cmd: |
+        set -euo pipefail
+        [ "${event.payload.repo}" = "${config.repo}" ] || { echo "ignore: repo='${event.payload.repo}'"; exit 2; }
+        if [ "${event.payload.fork:-false}" = "true" ]; then
+          echo "skip: PR #${event.payload.number} head is a fork"
+          exit 3
+        fi
+        SHA='${event.payload.sha}'
+        RUN="${config.worktree_base}/run-${SHA}"
+        mkdir -p "$RUN"
+        printf '%s\n%s\n%s\n%s\n' \
+          "${event.payload.number}" "${event.payload.ref}" \
+          "${event.payload.base_ref}" "$SHA" > "$RUN/pr.txt"
+        echo "guard passed for PR #${event.payload.number} (${event.payload.ref} → ${event.payload.base_ref}) @ ${SHA:0:12}"
+      emit:
+        "0": "erd-docs.ready.${event.payload.sha}"
+        "3": "erd-docs.skipped.${event.payload.sha}"
+        default: "erd-docs.failed.${event.payload.sha}"
+      timeout: 60
+
+  # --- regen: clone → install → generate → push ------------------------
+  # One shell node owns the whole deterministic pipeline; splitting
+  # it would only add event plumbing for state that lives in $RUN
+  # anyway. Exit-code contract: 0 = docs branch pushed, 4 = docs
+  # unchanged (clean no-op), anything else = failure (clone/install/
+  # generate/push error — the message is in the run log).
+  - id: erd-docs.regen
+    driver: shell
+    on:
+      - erd-docs.ready.*
+    emits:
+      - erd-docs.pushed.*
+      - erd-docs.clean.*
+      - erd-docs.failed.*
+    max_fires: unlimited
+    params:
+      env:
+        GH_TOKEN: "${secret.GITHUB_TOKEN}"
+      cmd: |
+        set -euo pipefail
+        export PATH="${config.bun_bin}:$PATH"
+        SHA='${event.match.1}'
+        RUN="${config.worktree_base}/run-${SHA}"
+        [ -f "$RUN/pr.txt" ] || { echo "missing run state for ${SHA:0:12}"; exit 5; }
+        { read -r PR; read -r HEAD_REF; read -r BASE_REF; read -r SHA2; } < "$RUN/pr.txt"
+        # Docs branch name = head branch, fork-prefix stripped
+        # (`owner:branch` → `branch`) and any refs/heads/ removed.
+        DOCS_BRANCH="${HEAD_REF#*:}"
+        DOCS_BRANCH="${DOCS_BRANCH#refs/heads/}"
+        WT="${config.worktree_base}/wt-${SHA}"
+        rm -rf "$WT"
+        mkdir -p "$WT"
+        trap 'rm -rf "$WT"' EXIT
+
+        # Fresh product clone at the PR head. blob:none keeps it fast;
+        # every git call carries the token header — the repo is
+        # private, and lazy blob fetches during checkout need auth too.
+        AUTH="http.extraHeader=Authorization: Bearer ${GH_TOKEN}"
+        git -c "$AUTH" clone --quiet --filter=blob:none "${config.product_repo_url}" "$WT/product"
+        git -C "$WT/product" -c "$AUTH" fetch --quiet origin "pull/${PR}/head"
+        git -C "$WT/product" -c "$AUTH" checkout --quiet FETCH_HEAD
+
+        # Docs clone — fresh https clone; push goes through
+        # http.extraHeader with GH_TOKEN (no ssh-agent, no stored
+        # credential in .git/config).
+        git clone --quiet "${config.docs_repo_url}" "$WT/docs"
+
+        (cd "$WT/product" && bun install --frozen-lockfile --silent)
+        (cd "$WT/product" && bun run db:erd >/dev/null)
+
+        if [ -z "$(git -C "$WT/docs" status --porcelain)" ]; then
+          echo "docs unchanged for ${DOCS_BRANCH} @ ${SHA:0:12} — nothing to push"
+          exit 4
+        fi
+
+        git -C "$WT/docs" checkout --quiet -B "$DOCS_BRANCH"
+        git -C "$WT/docs" add -A
+        git -C "$WT/docs" \
+          -c user.name="github-actions[bot]" \
+          -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+          commit --quiet -m "docs(db): regenerate ERD for ${DOCS_BRANCH}"
+        git -C "$WT/docs" \
+          -c http.extraHeader="Authorization: Bearer ${GH_TOKEN}" \
+          push --quiet origin "HEAD:refs/heads/${DOCS_BRANCH}"
+        echo "pushed docs branch ${DOCS_BRANCH} for PR #${PR} @ ${SHA:0:12}"
+      emit:
+        "0": "erd-docs.pushed.${event.match.1}"
+        "4": "erd-docs.clean.${event.match.1}"
+        default: "erd-docs.failed.${event.match.1}"
+      timeout: 900

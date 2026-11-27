@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "erd-docs params",
+  "type": "object",
+  "properties": {
+    "repo": {
+      "type": "string",
+      "description": "Watched repository as owner/name — REQUIRED per deployment. Drives the webhook repo filter. For this bundle: ktbhealth/product.",
+      "default": ""
+    },
+    "webhook_secret_env": {
+      "type": "string",
+      "description": "Env var holding this repo's webhook HMAC secret — the BUPHA_WH_<OWNER>_<REPO> convention (uppercased, '-' → '_'). REQUIRED per deployment; the var must exist in the campaign service env (~/.config/peregrin/env or cuora).",
+      "default": ""
+    },
+    "worktree_base": {
+      "type": "string",
+      "description": "Per-sha run state (run-<sha>/) and throwaway clones (wt-<sha>/) land here. MUST be absolute.",
+      "default": "/home/luis/.local/share/erd-docs/worktrees"
+    },
+    "docs_repo_url": {
+      "type": "string",
+      "description": "Docs repo clone URL — pushed via http.extraHeader + GITHUB_TOKEN, so https (no ssh-agent needed).",
+      "default": "https://github.com/ktbhealth/docs.git"
+    },
+    "product_repo_url": {
+      "type": "string",
+      "description": "Product repo clone URL — every git call carries the token header (private repo).",
+      "default": "https://github.com/ktbhealth/product.git"
+    },
+    "bun_bin": {
+      "type": "string",
+      "description": "bun binary dir prepended to PATH inside regen — systemd services get a minimal PATH.",
+      "default": "$HOME/.bun/bin"
+    }
+  },
+  "required": ["repo", "webhook_secret_env"]
+}
