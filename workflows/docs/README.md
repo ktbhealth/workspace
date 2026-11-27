@@ -33,17 +33,17 @@ create` → worktree remove → cleanup (lock, worktree, session).
   HEAD, so one run covers every merge since the last sync. The
   `supersede` key is the constant `docs-sync` (deliberately NOT `{sha}`):
   under `campaign serve` a burst of merges collapses to the newest
-  *pending* run, which still covers the evicted ones. Keying per-sha
+  _pending_ run, which still covers the evicted ones. Keying per-sha
   would queue one ~30 min agent run per merge for zero extra coverage.
   `cancel_running: false` — an in-flight turn always finishes.
 - **Lock trade-off, honestly** — `.sync-lock` is belt-and-suspenders
   for non-queue invocations; queued triggers serialize on the single
-  run slot anyway. A merge whose run is *evicted* by a newer pending
+  run slot anyway. A merge whose run is _evicted_ by a newer pending
   sync is covered by it (main HEAD includes it). The residual gap: if
   the docs PR from a run is still **open** when the next sync runs, the
   next agent starts from docs `origin/main` without the unmerged PR's
   changes and may produce a duplicate PR — merge or close the older
-  one first. And if a merge is the *last ever* while a sync is in
+  one first. And if a merge is the _last ever_ while a sync is in
   flight, its content lands in the next sync whenever that happens —
   there is no timer fallback; docs can lag until the next product
   merge (or a manual `campaign run`).
@@ -69,7 +69,7 @@ create` → worktree remove → cleanup (lock, worktree, session).
 - **Failures** — non-zero exits emit `docs.failed.<sha>` /
   `docs.agent.failed.<sha>`; cleanup releases the lock, removes the
   worktree, deletes the sepia session, and appends to
-  `cleanup-ledger.jsonl`. A publish failure *after* push can leave a
+  `cleanup-ledger.jsonl`. A publish failure _after_ push can leave a
   remote `docs/sync-<sha>` branch without a PR — harmless; the next
   sync uses a different sha. Recovery is the next merge or a manual
   `peregrin campaign run`.
@@ -79,8 +79,9 @@ create` → worktree remove → cleanup (lock, worktree, session).
 Same as every bundle — see [`../README.md`](../README.md): secrets in
 `~/.config/peregrin/env`, webhook on `ktbhealth/product` → shared
 listener (`pull_request` → `closed`), `tamias install --allow-drivers`
-+ `tamias deploy`, set REQUIRED `config:` keys in the rendered serve
-yaml, restart `peregrin-campaign`.
+
+- `tamias deploy`, set REQUIRED `config:` keys in the rendered serve
+  yaml, restart `peregrin-campaign`.
 
 For this deployment:
 
