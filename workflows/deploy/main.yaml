@@ -1,6 +1,7 @@
-# deploy — push to a watched repo's deploy ref → detached worktree at
-# the pushed sha → bun install + the service's deploy command →
-# cooldown. Continuous deployment as a peregrin campaign.
+# deploy — push to a watched repo's deploy ref → PERSISTENT worktree
+# per service → fetch + detached checkout at the pushed sha → bun
+# install + the service's deploy command → cooldown. Continuous
+# deployment as a peregrin campaign.
 #
 # ktbhealth counterpart of 9aia's docs-deploy bundle, generalized:
 # instead of a fixed docs-branch → gh-pages pipeline, each deployment
@@ -9,10 +10,18 @@
 #
 # Flow:
 #   push (refs/heads/<deploy_ref>) ──► route (repo/ref gate + pending
-#   commit status) ──► run: lasius fetch → worktree add @sha →
-#   install_cmd → deploy_cmd → verdict commit status → worktree
-#   cleanup ──► done|failed.<sha> ──► cooldown: sleep
+#   commit status) ──► run: lasius fetch → ensure persistent worktree
+#   → vcs checkout @sha → install_cmd → deploy_cmd → verdict commit
+#   status ──► done|failed.<sha> ──► cooldown: sleep
 #   config.cooldown_secs ──► idle.<sha> (run ends)
+#
+# The worktree is PERSISTENT (`worktree_base/deploy-<repo>`, one per
+# service): `lasius vcs checkout --detach <sha>` moves it between
+# revs while untracked files — node_modules, .vite task-cache, build
+# outputs — stay in place, so installs and builds run warm instead of
+# from scratch every deploy. A failed checkout (dirty tracked files)
+# recreates the worktree once, losing the caches but never the
+# deploy.
 #
 # THROTTLE, not debounce: the deploy fires immediately on push, then
 # the run parks in `cooldown` for cooldown_secs. Pushes arriving while
@@ -54,13 +63,15 @@ config:
   # webhook driver's `push_refs` filter. Deploys fire on merges to
   # the default branch; PR-branch pushes never reach the campaign.
   deploy_ref: "refs/heads/main"
-  # Deploy worktrees land here, one dir per sha
-  # (`deploy-<repo>-<sha>`), removed by trap on every exit path.
+  # Deploy worktrees land here — ONE persistent dir per service
+  # (`deploy-<repo>`, reused across shas via `lasius vcs checkout`),
+  # NOT removed between runs. Delete manually to reset caches.
   worktree_base: "$HOME/.local/share/deploy/worktrees"
-  # Dependency install run at the worktree root before deploy_cmd —
-  # a fresh worktree has no node_modules. bun's global cache makes
-  # this fast; the frozen-lockfile-first fallback mirrors
-  # docs-deploy.
+  # Dependency install run at the worktree root before deploy_cmd.
+  # The worktree is persistent, so node_modules survives between
+  # deploys — install is mostly a no-op verification; bun's global
+  # cache covers lockfile changes. The frozen-lockfile-first
+  # fallback mirrors docs-deploy.
   install_cmd: "bun install --frozen-lockfile 2>/dev/null || bun install"
   # The deploy itself, run at the worktree root. REQUIRED per
   # deployment — e.g. `bun run build && bun run deploy` for the
@@ -168,10 +179,10 @@ nodes:
         "3": "deploy.ignored"
         default: "deploy.route.failed.${event.payload.sha}"
 
-  # --- run: worktree at sha → install → deploy → verdict → cleanup -----
+  # --- run: persistent worktree → checkout sha → install → deploy ----
   # One shell node owns the whole deploy because it is composite:
-  # fetch + stale-dir prune + worktree add + install_cmd +
-  # deploy_cmd + verdict status + trap cleanup. The verdict status is
+  # fetch + ensure-worktree + checkout sha + install_cmd +
+  # deploy_cmd + verdict status. The verdict status is
   # posted HERE (not a downstream node) so it lands the moment the
   # deploy settles — a separate status node would queue behind the
   # cooldown sleep and report 15min late.
@@ -212,7 +223,11 @@ nodes:
         BASE=$(expand_tilde "${config.worktree_base}")
         CHECKOUT=$(expand_tilde "${config.checkout}")
         SAFE_REPO=$(printf '%s' "${config.repo}" | tr '/:' '__')
-        RUN="$BASE/deploy-${SAFE_REPO}-${SHA}"
+        # Persistent per-service checkout — reused across deploys so
+        # node_modules and build caches (vite task-cache etc.) stay
+        # warm. Never removed on exit; recreated only when the
+        # checkout to the pushed sha fails.
+        RUN="$BASE/deploy-${SAFE_REPO}"
         post_status() {
           [ -n "${config.status_context}" ] || return 0
           lasius --root "$ROOT" forge status create "$CHECKOUT" \
@@ -220,11 +235,11 @@ nodes:
             --description "$2" --json >/dev/null 2>&1 \
             || echo "warn: verdict status post failed ($1)"
         }
-        cleanup() {
-          lasius --root "$ROOT" vcs worktree remove "$CHECKOUT" --dir "$RUN" \
-            --json >/dev/null 2>&1 || true
+        recreate_worktree() {
+          lasius --root "$ROOT" vcs worktree remove "$CHECKOUT" --dir "$RUN" --json >/dev/null 2>&1 || true
+          [ ! -e "$RUN" ] || rm -rf "$RUN"
+          lasius --root "$ROOT" vcs worktree add "$CHECKOUT" --dir "$RUN" --rev "$SHA" --json >/dev/null
         }
-        trap cleanup EXIT
         # deploy_cmd is REQUIRED per deployment — left empty the
         # subshell below would succeed vacuously and post a false
         # "deploy finished" verdict.
@@ -235,12 +250,21 @@ nodes:
         [ -d "$CHECKOUT/.git" ] || lasius --root "$ROOT" add "${CHECKOUT##*/}" >/dev/null
         lasius --root "$ROOT" vcs fetch "$CHECKOUT" --json >/dev/null \
           || { post_status failure "deploy failed: git fetch"; echo "fetch failed"; exit 1; }
-        # Stale dir from a crashed run — remove the registered
-        # worktree first, then any plain-dir leftover.
-        lasius --root "$ROOT" vcs worktree remove "$CHECKOUT" --dir "$RUN" --json >/dev/null 2>&1 || true
-        [ ! -e "$RUN" ] || rm -rf "$RUN"
-        lasius --root "$ROOT" vcs worktree add "$CHECKOUT" --dir "$RUN" --rev "$SHA" --json >/dev/null \
-          || { post_status failure "deploy failed: worktree add"; echo "worktree add failed"; exit 1; }
+        # First deploy (or a manually deleted dir): create the
+        # persistent worktree straight at the pushed sha.
+        if [ ! -e "$RUN/.git" ]; then
+          recreate_worktree \
+            || { post_status failure "deploy failed: worktree add"; echo "worktree add failed"; exit 1; }
+        fi
+        # Move the persistent checkout to the pushed sha — untracked
+        # files (node_modules, caches) survive. A dirty tracked tree
+        # fails the checkout; rebuild the worktree once before giving
+        # up (loses the warm caches, keeps the deploy honest).
+        if ! lasius --root "$ROOT" vcs checkout "$RUN" --rev "$SHA" --json >/dev/null; then
+          echo "checkout $SHA failed — recreating worktree"
+          recreate_worktree \
+            || { post_status failure "deploy failed: worktree recreate"; echo "worktree recreate failed"; exit 1; }
+        fi
         (
           set -euo pipefail
           cd "$RUN"

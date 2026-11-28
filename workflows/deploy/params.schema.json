@@ -25,12 +25,12 @@
     },
     "worktree_base": {
       "type": "string",
-      "description": "Deploy worktrees land here, one dir per sha (deploy-<repo>-<sha>), removed by trap on every exit path.",
+      "description": "Deploy worktrees land here — ONE persistent dir per service (deploy-<repo>), reused across shas via `lasius vcs checkout`; not removed between runs.",
       "default": "$HOME/.local/share/deploy/worktrees"
     },
     "install_cmd": {
       "type": "string",
-      "description": "Dependency install run at the worktree root before deploy_cmd — a fresh worktree has no node_modules.",
+      "description": "Dependency install run at the worktree root before deploy_cmd — the worktree is persistent so node_modules survives between deploys; bun's global cache covers lockfile changes.",
       "default": "bun install --frozen-lockfile 2>/dev/null || bun install"
     },
     "deploy_cmd": {
