@@ -13,10 +13,19 @@ Cloudflare Workers services).
 ```
 push (refs/heads/<deploy_ref>)
   → route      repo/ref gate + pending commit status
-  → run        lasius fetch → worktree add @sha → install_cmd →
-               deploy_cmd → verdict status → trap cleanup
+  → run        lasius fetch → ensure persistent worktree →
+               vcs checkout @sha → install_cmd → deploy_cmd →
+               verdict status
   → cooldown   sleep cooldown_secs → run ends
 ```
+
+**Persistent checkout, not per-sha worktrees.** Each service gets ONE
+worktree under `worktree_base` (`deploy-<repo>`), reused across
+deploys: `lasius vcs checkout --detach <sha>` moves it to the pushed
+sha while untracked files — `node_modules`, the vite task-cache,
+build outputs — stay in place. Installs and builds run warm; a fresh
+worktree is only created on first deploy or when the checkout fails
+(dirty tracked files → recreate once, caches lost, deploy proceeds).
 
 **Throttle, not debounce.** The deploy fires immediately on push;
 the run then parks in `cooldown` for `cooldown_secs` (default 900 =
@@ -132,10 +141,11 @@ Repos without a deploy path (`ui`, `slidev-theme-ktb`,
 - **Never kills in-flight work** — `cancel_running: false`; deploys
   and cooldowns run to completion. Only _pending_ triggers are
   replaced (latest-wins).
-- **Worktree isolation** — deploys run in a detached lasius worktree
-  under `worktree_base`, never in the operator's checkouts; the dir
-  is removed by `trap cleanup EXIT` on every path (a dirty worktree
-  lasius refuses to remove stays for inspection).
+- **Warm-checkout isolation** — deploys run in a dedicated lasius
+  worktree per service under `worktree_base`, never in the
+  operator's checkouts. The dir persists between runs (that is the
+  point — warm `node_modules`/build caches); delete it manually to
+  reset. A failed `vcs checkout` recreates it once.
 - **Deploy-then-throttle** — cooldown covers success AND failure, so
   retries are rate-limited too.
 - **Status honesty** — the verdict status is posted inside the run
@@ -154,10 +164,13 @@ Repos without a deploy path (`ui`, `slidev-theme-ktb`,
   unaffected. A service restart mid-cooldown loses the remaining
   wait (the durable queue keeps pending triggers; an in-flight run
   is reclaimed, not re-run).
-- **Deploy-from-worktree cost** — every deploy pays `install_cmd`
-  from scratch (bun's global cache keeps it fast). A persistent
-  checkout would be faster but needs a checkout-sync verb lasius
-  doesn't have; revisit if install time hurts.
+- **Warm caches, honest revs** — the persistent worktree keeps
+  `node_modules` and tool caches (e.g. `node_modules/.vite/
+  task-cache`) across deploys; `vcs checkout --detach` still lands
+  on the exact pushed sha, and `vp` task inputs are content-hashed
+  so unchanged modules restore from cache. Requires the `lasius vcs
+  checkout` verb (lasius ≥ the release carrying it) — older lasius
+  fails the run node loudly at the checkout step.
 - **Deploy cmds are per-service config** — the bundle ships no
   defaults; each serve file carries its repo's real build+deploy
   command. Verify `deploy_cmd` manually once before pointing live
@@ -170,9 +183,10 @@ Repos without a deploy path (`ui`, `slidev-theme-ktb`,
 
 - Run logs: `tamias logs deploy` / history JSONL under
   `~/.local/share/peregrin/serve-history/deploy-<service>.jsonl`.
-- Worktrees: `<worktree_base>/deploy-<repo>-<sha>` — auto-removed on
-  every terminal path; gc manually with
-  `lasius --root <ws> vcs worktree remove <checkout> --dir <path>`.
+- Worktrees: `<worktree_base>/deploy-<repo>` — persistent per
+  service, reused across shas; remove manually with
+  `lasius --root <ws> vcs worktree remove <checkout> --dir <path>`
+  to reset caches (a dirty worktree needs the dir deleted too).
 - Queue state: `<queue-store-dir>/deploy-<service>.db` (sqlite) —
   pending triggers survive restarts.
 - Validate without installing:
